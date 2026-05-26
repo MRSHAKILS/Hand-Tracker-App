@@ -1,16 +1,33 @@
 const video = document.querySelector("#camera");
-const canvas = document.querySelector("#paint");
-const context = canvas.getContext("2d", { alpha: true });
+const paintCanvas = document.querySelector("#paint");
+const paintCtx = paintCanvas.getContext("2d", { alpha: true });
+const cursorCanvas = document.querySelector("#cursor");
+const cursorCtx = cursorCanvas.getContext("2d", { alpha: true });
 const stage = document.querySelector(".stage");
 const startButton = document.querySelector("#startButton");
 const statusText = document.querySelector("#status");
 
 const handsReady = waitForGlobal("Hands");
 
+const DOT_SPACING = 8;
+const DOT_RADIUS = 5;
+const DOT_COLOR = "#ffd84d";
+const DOT_GLOW = "#ff5b9a";
+
+const surfaces = [
+  { canvas: paintCanvas, ctx: paintCtx, persistent: true, lastW: 0, lastH: 0 },
+  { canvas: cursorCanvas, ctx: cursorCtx, persistent: false, lastW: 0, lastH: 0 }
+];
+
+const pen = {
+  active: false,
+  prevPoint: null,
+  prevMidpoint: null,
+  distanceLeft: 0
+};
+
 let hands;
 let isTracking = false;
-let canvasWidth = 0;
-let canvasHeight = 0;
 
 function waitForGlobal(name) {
   return new Promise((resolve, reject) => {
@@ -38,42 +55,178 @@ function setStatus(message) {
   statusText.textContent = message;
 }
 
-function resizeCanvas() {
-  const rect = canvas.getBoundingClientRect();
+function resizeSurfaces() {
   const dpr = window.devicePixelRatio || 1;
-  const width = Math.round(rect.width * dpr);
-  const height = Math.round(rect.height * dpr);
 
-  if (canvasWidth === width && canvasHeight === height) {
-    return;
+  for (const surface of surfaces) {
+    const rect = surface.canvas.getBoundingClientRect();
+    const width = Math.round(rect.width * dpr);
+    const height = Math.round(rect.height * dpr);
+
+    if (surface.lastW === width && surface.lastH === height) {
+      continue;
+    }
+
+    if (surface.persistent && surface.lastW > 0 && surface.lastH > 0) {
+      // Preserve existing trail across resizes by snapshotting and restretching.
+      const snapshot = document.createElement("canvas");
+      snapshot.width = surface.canvas.width;
+      snapshot.height = surface.canvas.height;
+      snapshot.getContext("2d").drawImage(surface.canvas, 0, 0);
+
+      surface.canvas.width = width;
+      surface.canvas.height = height;
+      surface.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      surface.ctx.drawImage(snapshot, 0, 0, width / dpr, height / dpr);
+    } else {
+      surface.canvas.width = width;
+      surface.canvas.height = height;
+      surface.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    surface.lastW = width;
+    surface.lastH = height;
   }
-
-  canvasWidth = width;
-  canvasHeight = height;
-  canvas.width = width;
-  canvas.height = height;
-  context.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function drawFingerDot(landmarks) {
-  resizeCanvas();
-  context.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+function landmarkToCanvas(landmark) {
+  // Video is mirrored via CSS scaleX(-1), so mirror x to match what the user sees.
+  return {
+    x: (1 - landmark.x) * paintCanvas.clientWidth,
+    y: landmark.y * paintCanvas.clientHeight
+  };
+}
 
-  if (!landmarks?.length) {
+function isFingerExtended(landmarks, tipIdx, pipIdx) {
+  return landmarks[tipIdx].y < landmarks[pipIdx].y;
+}
+
+function classifyGesture(landmarks) {
+  return {
+    indexUp: isFingerExtended(landmarks, 8, 6),
+    middleUp: isFingerExtended(landmarks, 12, 10),
+    ringUp: isFingerExtended(landmarks, 16, 14),
+    pinkyUp: isFingerExtended(landmarks, 20, 18)
+  };
+}
+
+function drawDot(x, y) {
+  paintCtx.beginPath();
+  paintCtx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2);
+  paintCtx.fillStyle = DOT_COLOR;
+  paintCtx.shadowColor = DOT_GLOW;
+  paintCtx.shadowBlur = 14;
+  paintCtx.fill();
+  paintCtx.shadowBlur = 0;
+}
+
+function dropDotsAlongCurve(p0, p1, p2) {
+  // Sample a quadratic Bezier: P0 (start) -> P1 (control) -> P2 (end).
+  // Walking the curve in small steps lets us drop dots at constant arc-length.
+  const approxLength =
+    Math.hypot(p1.x - p0.x, p1.y - p0.y) + Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  const samples = Math.max(2, Math.ceil(approxLength / 2));
+
+  let prevX = p0.x;
+  let prevY = p0.y;
+
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples;
+    const mt = 1 - t;
+    const x = mt * mt * p0.x + 2 * mt * t * p1.x + t * t * p2.x;
+    const y = mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y;
+
+    pen.distanceLeft += Math.hypot(x - prevX, y - prevY);
+    if (pen.distanceLeft >= DOT_SPACING) {
+      drawDot(x, y);
+      pen.distanceLeft = 0;
+    }
+
+    prevX = x;
+    prevY = y;
+  }
+}
+
+function drawCursor(x, y, drawing) {
+  cursorCtx.clearRect(0, 0, cursorCanvas.clientWidth, cursorCanvas.clientHeight);
+
+  if (drawing) {
+    cursorCtx.beginPath();
+    cursorCtx.arc(x, y, DOT_RADIUS + 5, 0, Math.PI * 2);
+    cursorCtx.fillStyle = "rgba(255, 216, 77, 0.85)";
+    cursorCtx.shadowColor = DOT_GLOW;
+    cursorCtx.shadowBlur = 20;
+    cursorCtx.fill();
+    cursorCtx.shadowBlur = 0;
     return;
   }
 
-  const fingertip = landmarks[8];
-  const x = (1 - fingertip.x) * canvas.clientWidth;
-  const y = fingertip.y * canvas.clientHeight;
+  cursorCtx.beginPath();
+  cursorCtx.arc(x, y, 14, 0, Math.PI * 2);
+  cursorCtx.strokeStyle = "rgba(19, 200, 192, 0.95)";
+  cursorCtx.lineWidth = 3;
+  cursorCtx.stroke();
 
-  context.beginPath();
-  context.arc(x, y, 13, 0, Math.PI * 2);
-  context.fillStyle = "#ffd84d";
-  context.shadowColor = "#ff5b9a";
-  context.shadowBlur = 20;
-  context.fill();
-  context.shadowBlur = 0;
+  cursorCtx.beginPath();
+  cursorCtx.arc(x, y, 3, 0, Math.PI * 2);
+  cursorCtx.fillStyle = "rgba(19, 200, 192, 0.95)";
+  cursorCtx.fill();
+}
+
+function liftPen() {
+  pen.active = false;
+  pen.prevPoint = null;
+  pen.prevMidpoint = null;
+  pen.distanceLeft = 0;
+}
+
+function clearCursor() {
+  cursorCtx.clearRect(0, 0, cursorCanvas.clientWidth, cursorCanvas.clientHeight);
+}
+
+function processFrame(results) {
+  resizeSurfaces();
+
+  const landmarks = results.multiHandLandmarks?.[0];
+  if (!landmarks?.length) {
+    liftPen();
+    clearCursor();
+    return;
+  }
+
+  const fingertip = landmarkToCanvas(landmarks[8]);
+  const gesture = classifyGesture(landmarks);
+  const shouldDraw = gesture.indexUp && !gesture.middleUp;
+
+  drawCursor(fingertip.x, fingertip.y, shouldDraw);
+
+  if (!shouldDraw) {
+    liftPen();
+    return;
+  }
+
+  if (!pen.active) {
+    // Start of a new stroke: anchor history at the current fingertip and seed a dot.
+    pen.active = true;
+    pen.prevPoint = fingertip;
+    pen.prevMidpoint = fingertip;
+    pen.distanceLeft = 0;
+    drawDot(fingertip.x, fingertip.y);
+    return;
+  }
+
+  // Bezier-smooth the path: use the fingertip as the control point and the
+  // midpoints of consecutive samples as the curve's start and end. This avoids
+  // sharp corners at every raw sample and gives the trail a fluid feel.
+  const newMidpoint = {
+    x: (pen.prevPoint.x + fingertip.x) / 2,
+    y: (pen.prevPoint.y + fingertip.y) / 2
+  };
+
+  dropDotsAlongCurve(pen.prevMidpoint, pen.prevPoint, newMidpoint);
+
+  pen.prevMidpoint = newMidpoint;
+  pen.prevPoint = fingertip;
 }
 
 async function createTracker() {
@@ -90,9 +243,7 @@ async function createTracker() {
     minTrackingConfidence: 0.65
   });
 
-  hands.onResults((results) => {
-    drawFingerDot(results.multiHandLandmarks?.[0]);
-  });
+  hands.onResults(processFrame);
 }
 
 async function startCamera() {
@@ -169,7 +320,7 @@ async function startTracking() {
   }
 }
 
-window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", resizeSurfaces);
 startButton.addEventListener("click", startTracking);
 
 handsReady

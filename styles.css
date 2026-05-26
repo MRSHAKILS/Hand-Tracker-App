@@ -38,7 +38,8 @@ button {
 }
 
 .camera,
-.paint {
+.paint,
+.cursor {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -61,10 +62,15 @@ button {
   pointer-events: none;
 }
 
+.cursor {
+  z-index: 3;
+  pointer-events: none;
+}
+
 .launch {
   position: absolute;
   inset: 0;
-  z-index: 3;
+  z-index: 4;
   display: grid;
   place-content: center;
   justify-items: center;
