@@ -3,6 +3,7 @@ const paintCanvas = document.querySelector("#paint");
 const paintCtx = paintCanvas.getContext("2d", { alpha: true });
 const cursorCanvas = document.querySelector("#cursor");
 const cursorCtx = cursorCanvas.getContext("2d", { alpha: true });
+const paletteEl = document.querySelector("#palette");
 const stage = document.querySelector(".stage");
 const startButton = document.querySelector("#startButton");
 const statusText = document.querySelector("#status");
@@ -11,10 +12,27 @@ const handsReady = waitForGlobal("Hands");
 
 const DOT_SPACING = 8;
 const DOT_RADIUS = 5;
-const DOT_COLOR = "#ffd84d";
-const DOT_GLOW = "#ff5b9a";
 const CLEAR_HOLD_MS = 600;
 const CLEAR_FADE_FRAMES = 14;
+const SWATCH_HOLD_MS = 450;
+
+const palette = [
+  { color: "#ff5252", glow: "#ffb1b1" },
+  { color: "#ff9c3a", glow: "#ffcf95" },
+  { color: "#ffd84d", glow: "#fff39e" },
+  { color: "#7ed957", glow: "#c5f0a8" },
+  { color: "#13c8c0", glow: "#85ebe5" },
+  { color: "#5fa8ff", glow: "#aacbff" },
+  { color: "#b266ff", glow: "#d8b3ff" },
+  { color: "#ff5b9a", glow: "#ffacc9" },
+  { color: "#fff8d8", glow: "#ffffff" }
+];
+
+let activeColorIdx = 2;
+let hoveredSwatchIdx = null;
+const swatchHold = { startedAt: null };
+const swatchEls = [];
+let swatchRects = [];
 
 const surfaces = [
   { canvas: paintCanvas, ctx: paintCtx, persistent: true, lastW: 0, lastH: 0 },
@@ -118,10 +136,11 @@ function classifyGesture(landmarks) {
 }
 
 function drawDot(x, y) {
+  const swatch = palette[activeColorIdx];
   paintCtx.beginPath();
   paintCtx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2);
-  paintCtx.fillStyle = DOT_COLOR;
-  paintCtx.shadowColor = DOT_GLOW;
+  paintCtx.fillStyle = swatch.color;
+  paintCtx.shadowColor = swatch.glow;
   paintCtx.shadowBlur = 14;
   paintCtx.fill();
   paintCtx.shadowBlur = 0;
@@ -158,11 +177,25 @@ function drawCursor(x, y, mode, clearProgress = 0) {
   cursorCtx.clearRect(0, 0, cursorCanvas.clientWidth, cursorCanvas.clientHeight);
 
   if (mode === "draw") {
+    const swatch = palette[activeColorIdx];
     cursorCtx.beginPath();
     cursorCtx.arc(x, y, DOT_RADIUS + 5, 0, Math.PI * 2);
-    cursorCtx.fillStyle = "rgba(255, 216, 77, 0.85)";
-    cursorCtx.shadowColor = DOT_GLOW;
+    cursorCtx.fillStyle = swatch.color;
+    cursorCtx.globalAlpha = 0.85;
+    cursorCtx.shadowColor = swatch.glow;
     cursorCtx.shadowBlur = 20;
+    cursorCtx.fill();
+    cursorCtx.globalAlpha = 1;
+    cursorCtx.shadowBlur = 0;
+    return;
+  }
+
+  if (mode === "swatch") {
+    cursorCtx.beginPath();
+    cursorCtx.arc(x, y, 4, 0, Math.PI * 2);
+    cursorCtx.fillStyle = "#fff8d8";
+    cursorCtx.shadowColor = "rgba(255, 248, 216, 0.9)";
+    cursorCtx.shadowBlur = 10;
     cursorCtx.fill();
     cursorCtx.shadowBlur = 0;
     return;
@@ -240,6 +273,84 @@ function clearCursor() {
   cursorCtx.clearRect(0, 0, cursorCanvas.clientWidth, cursorCanvas.clientHeight);
 }
 
+function createPalette() {
+  paletteEl.innerHTML = "";
+  swatchEls.length = 0;
+
+  palette.forEach((swatch, index) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch";
+    btn.dataset.index = String(index);
+    btn.style.setProperty("--swatch-color", swatch.color);
+    btn.style.setProperty("--swatch-glow", swatch.glow);
+    btn.setAttribute("aria-label", `Color ${index + 1}`);
+    btn.addEventListener("click", () => setActiveColor(index));
+    paletteEl.appendChild(btn);
+    swatchEls.push(btn);
+  });
+
+  updateActiveSwatchUi();
+  requestAnimationFrame(updateSwatchRects);
+}
+
+function setActiveColor(index) {
+  if (index === activeColorIdx) {
+    return;
+  }
+  activeColorIdx = index;
+  updateActiveSwatchUi();
+}
+
+function updateActiveSwatchUi() {
+  swatchEls.forEach((el, i) => {
+    el.classList.toggle("is-active", i === activeColorIdx);
+  });
+}
+
+function updateSwatchRects() {
+  const stageRect = stage.getBoundingClientRect();
+  swatchRects = swatchEls.map((el, i) => {
+    const r = el.getBoundingClientRect();
+    return {
+      index: i,
+      left: r.left - stageRect.left,
+      top: r.top - stageRect.top,
+      right: r.right - stageRect.left,
+      bottom: r.bottom - stageRect.top
+    };
+  });
+}
+
+function findSwatchAt(x, y) {
+  for (const r of swatchRects) {
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      return r.index;
+    }
+  }
+  return null;
+}
+
+function setSwatchProgress(index, progress) {
+  if (index === null || index === undefined) {
+    return;
+  }
+  const el = swatchEls[index];
+  if (!el) {
+    return;
+  }
+  const clamped = Math.max(0, Math.min(1, progress));
+  el.style.setProperty("--swatch-progress", `${clamped * 100}%`);
+}
+
+function resetSwatchHold() {
+  if (hoveredSwatchIdx !== null) {
+    setSwatchProgress(hoveredSwatchIdx, 0);
+  }
+  hoveredSwatchIdx = null;
+  swatchHold.startedAt = null;
+}
+
 function processFrame(results) {
   resizeSurfaces();
 
@@ -247,6 +358,7 @@ function processFrame(results) {
   if (!landmarks?.length) {
     liftPen();
     clearHold.startedAt = null;
+    resetSwatchHold();
     clearCursor();
     return;
   }
@@ -260,6 +372,7 @@ function processFrame(results) {
 
   if (isClearGesture) {
     liftPen();
+    resetSwatchHold();
     if (clearHold.startedAt === null) {
       clearHold.startedAt = performance.now();
     }
@@ -275,10 +388,38 @@ function processFrame(results) {
   }
 
   clearHold.startedAt = null;
-  drawCursor(fingertip.x, fingertip.y, shouldDraw ? "draw" : "hover");
 
-  if (!shouldDraw) {
+  if (shouldDraw) {
+    resetSwatchHold();
+    drawCursor(fingertip.x, fingertip.y, "draw");
+  } else {
+    // Hover mode: pen lifted. This is the only state where swatch picking happens.
     liftPen();
+    const swatchIdx = findSwatchAt(fingertip.x, fingertip.y);
+
+    if (swatchIdx === null || swatchIdx === activeColorIdx) {
+      resetSwatchHold();
+      drawCursor(fingertip.x, fingertip.y, swatchIdx === null ? "hover" : "swatch");
+      return;
+    }
+
+    if (hoveredSwatchIdx !== swatchIdx) {
+      if (hoveredSwatchIdx !== null) {
+        setSwatchProgress(hoveredSwatchIdx, 0);
+      }
+      hoveredSwatchIdx = swatchIdx;
+      swatchHold.startedAt = performance.now();
+    }
+
+    const elapsed = performance.now() - swatchHold.startedAt;
+    const progress = Math.min(1, elapsed / SWATCH_HOLD_MS);
+    setSwatchProgress(swatchIdx, progress);
+    drawCursor(fingertip.x, fingertip.y, "swatch");
+
+    if (progress >= 1) {
+      setActiveColor(swatchIdx);
+      resetSwatchHold();
+    }
     return;
   }
 
@@ -397,8 +538,13 @@ async function startTracking() {
   }
 }
 
-window.addEventListener("resize", resizeSurfaces);
+window.addEventListener("resize", () => {
+  resizeSurfaces();
+  updateSwatchRects();
+});
 startButton.addEventListener("click", startTracking);
+
+createPalette();
 
 handsReady
   .then(() => setStatus("Ready"))
