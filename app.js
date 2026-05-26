@@ -10,11 +10,19 @@ const statusText = document.querySelector("#status");
 
 const handsReady = waitForGlobal("Hands");
 
-const DOT_SPACING = 8;
-const DOT_RADIUS = 5;
 const CLEAR_HOLD_MS = 600;
 const CLEAR_FADE_FRAMES = 14;
 const SWATCH_HOLD_MS = 450;
+
+// Brush sizing. Hand-size is measured as the wrist -> middle-MCP distance in
+// MediaPipe's normalized coordinates (0..1 of the input frame). The near/far
+// thresholds were picked to feel right for a typical webcam at arm's length.
+const MIN_BRUSH_RADIUS = 3;
+const MAX_BRUSH_RADIUS = 22;
+const MIN_HAND_SIZE = 0.09;
+const MAX_HAND_SIZE = 0.26;
+const BRUSH_SMOOTHING = 0.18;
+const SPACING_PER_RADIUS = 1.3;
 
 const palette = [
   { color: "#ff5252", glow: "#ffb1b1" },
@@ -33,6 +41,12 @@ let hoveredSwatchIdx = null;
 const swatchHold = { startedAt: null };
 const swatchEls = [];
 let swatchRects = [];
+
+const brush = {
+  smoothedSize: null,
+  radius: (MIN_BRUSH_RADIUS + MAX_BRUSH_RADIUS) / 2,
+  spacing: ((MIN_BRUSH_RADIUS + MAX_BRUSH_RADIUS) / 2) * SPACING_PER_RADIUS
+};
 
 const surfaces = [
   { canvas: paintCanvas, ctx: paintCtx, persistent: true, lastW: 0, lastH: 0 },
@@ -135,13 +149,35 @@ function classifyGesture(landmarks) {
   };
 }
 
+function handSize(landmarks) {
+  // Distance from wrist (0) to middle MCP (9) in MediaPipe normalized coords.
+  // This palm-spine length is stable across finger poses, unlike fingertip
+  // distances that change with which fingers are extended.
+  const wrist = landmarks[0];
+  const midMcp = landmarks[9];
+  return Math.hypot(wrist.x - midMcp.x, wrist.y - midMcp.y);
+}
+
+function updateBrush(landmarks) {
+  const raw = handSize(landmarks);
+  brush.smoothedSize =
+    brush.smoothedSize === null
+      ? raw
+      : brush.smoothedSize * (1 - BRUSH_SMOOTHING) + raw * BRUSH_SMOOTHING;
+
+  const range = MAX_HAND_SIZE - MIN_HAND_SIZE;
+  const t = Math.max(0, Math.min(1, (brush.smoothedSize - MIN_HAND_SIZE) / range));
+  brush.radius = MIN_BRUSH_RADIUS + (MAX_BRUSH_RADIUS - MIN_BRUSH_RADIUS) * t;
+  brush.spacing = Math.max(2, brush.radius * SPACING_PER_RADIUS);
+}
+
 function drawDot(x, y) {
   const swatch = palette[activeColorIdx];
   paintCtx.beginPath();
-  paintCtx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2);
+  paintCtx.arc(x, y, brush.radius, 0, Math.PI * 2);
   paintCtx.fillStyle = swatch.color;
   paintCtx.shadowColor = swatch.glow;
-  paintCtx.shadowBlur = 14;
+  paintCtx.shadowBlur = Math.max(8, brush.radius * 2);
   paintCtx.fill();
   paintCtx.shadowBlur = 0;
 }
@@ -163,7 +199,7 @@ function dropDotsAlongCurve(p0, p1, p2) {
     const y = mt * mt * p0.y + 2 * mt * t * p1.y + t * t * p2.y;
 
     pen.distanceLeft += Math.hypot(x - prevX, y - prevY);
-    if (pen.distanceLeft >= DOT_SPACING) {
+    if (pen.distanceLeft >= brush.spacing) {
       drawDot(x, y);
       pen.distanceLeft = 0;
     }
@@ -179,11 +215,11 @@ function drawCursor(x, y, mode, clearProgress = 0) {
   if (mode === "draw") {
     const swatch = palette[activeColorIdx];
     cursorCtx.beginPath();
-    cursorCtx.arc(x, y, DOT_RADIUS + 5, 0, Math.PI * 2);
+    cursorCtx.arc(x, y, brush.radius + 4, 0, Math.PI * 2);
     cursorCtx.fillStyle = swatch.color;
     cursorCtx.globalAlpha = 0.85;
     cursorCtx.shadowColor = swatch.glow;
-    cursorCtx.shadowBlur = 20;
+    cursorCtx.shadowBlur = Math.max(14, brush.radius * 2.2);
     cursorCtx.fill();
     cursorCtx.globalAlpha = 1;
     cursorCtx.shadowBlur = 0;
@@ -222,8 +258,11 @@ function drawCursor(x, y, mode, clearProgress = 0) {
     return;
   }
 
+  // Hover cursor: a hollow ring sized to preview the current brush, plus a
+  // small inner dot so the fingertip position is still pinpointed.
+  const hoverRadius = Math.max(10, brush.radius + 4);
   cursorCtx.beginPath();
-  cursorCtx.arc(x, y, 14, 0, Math.PI * 2);
+  cursorCtx.arc(x, y, hoverRadius, 0, Math.PI * 2);
   cursorCtx.strokeStyle = "rgba(19, 200, 192, 0.95)";
   cursorCtx.lineWidth = 3;
   cursorCtx.stroke();
@@ -362,6 +401,8 @@ function processFrame(results) {
     clearCursor();
     return;
   }
+
+  updateBrush(landmarks);
 
   const fingertip = landmarkToCanvas(landmarks[8]);
   const gesture = classifyGesture(landmarks);
