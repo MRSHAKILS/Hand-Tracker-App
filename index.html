@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Finger Spark</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      window.Module = {
+        onRuntimeInitialized() {
+          window.dispatchEvent(new Event("opencv-ready"));
+        }
+      };
+    </script>
+    <script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <main class="stage" aria-label="Finger Spark hand tracker">
+      <video id="camera" class="camera" autoplay playsinline muted></video>
+      <canvas id="paint" class="paint"></canvas>
+      <section id="launch" class="launch" aria-live="polite">
+        <h1>Finger Spark</h1>
+        <button id="startButton" class="start-button" type="button">Start</button>
+        <p id="status" class="status">Loading magic...</p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,125 @@
+:root {
+  color-scheme: dark;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  --ink: #fff8d8;
+  --bubble: #13c8c0;
+  --sun: #ffd84d;
+  --berry: #ff5b9a;
+  --night: #17222f;
+  --grass: #7ed957;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 16% 18%, rgba(255, 216, 77, 0.9) 0 7vmin, transparent 7.2vmin),
+    radial-gradient(circle at 84% 22%, rgba(255, 91, 154, 0.82) 0 5vmin, transparent 5.2vmin),
+    linear-gradient(135deg, #17222f 0%, #24395d 48%, #146b72 100%);
+}
+
+button {
+  font: inherit;
+}
+
+.stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  min-height: 420px;
+  isolation: isolate;
+}
+
+.camera,
+.paint {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.camera {
+  object-fit: cover;
+  transform: scaleX(-1);
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.stage.is-live .camera {
+  opacity: 1;
+}
+
+.paint {
+  z-index: 2;
+  pointer-events: none;
+}
+
+.launch {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 18px;
+  padding: 24px;
+  background:
+    linear-gradient(90deg, rgba(255, 248, 216, 0.08) 0 8px, transparent 8px 44px),
+    linear-gradient(0deg, rgba(255, 248, 216, 0.08) 0 8px, transparent 8px 44px),
+    rgba(23, 34, 47, 0.48);
+  transition: opacity 180ms ease, visibility 180ms ease;
+}
+
+.stage.is-live .launch {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.launch h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(2.75rem, 8vw, 6rem);
+  line-height: 1;
+  text-align: center;
+  text-shadow: 0 8px 0 rgba(0, 0, 0, 0.2);
+}
+
+.start-button {
+  width: min(260px, 70vw);
+  min-height: 72px;
+  border: 0;
+  border-radius: 8px;
+  color: #17222f;
+  background: linear-gradient(135deg, var(--sun), #fff176 55%, var(--grass));
+  box-shadow: 0 12px 0 #0b6f67, 0 22px 36px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  font-size: clamp(1.35rem, 4vw, 2rem);
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.start-button:active {
+  transform: translateY(5px);
+  box-shadow: 0 7px 0 #0b6f67, 0 14px 26px rgba(0, 0, 0, 0.24);
+}
+
+.start-button:disabled {
+  cursor: wait;
+  filter: saturate(0.7);
+}
+
+.status {
+  min-height: 24px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: center;
+}

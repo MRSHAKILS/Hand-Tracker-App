@@ -1,0 +1,11 @@
+{
+  "name": "hand-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "test": "node --check server.mjs && node --check app.js",
+    "build": "node --check server.mjs && node --check app.js"
+  }
+}
