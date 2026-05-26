@@ -7,5 +7,8 @@
     "dev": "node server.mjs",
     "test": "node --check server.mjs && node --check app.js",
     "build": "node --check server.mjs && node --check app.js"
+  },
+  "dependencies": {
+    "@mediapipe/hands": "^0.4.1675469240"
   }
 }

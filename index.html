@@ -5,16 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Finger Spark</title>
     <link rel="stylesheet" href="styles.css" />
-    <script>
-      window.Module = {
-        onRuntimeInitialized() {
-          window.dispatchEvent(new Event("opencv-ready"));
-        }
-      };
-    </script>
-    <script async src="https://docs.opencv.org/4.9.0/opencv.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script defer src="./node_modules/@mediapipe/hands/hands.js"></script>
     <script type="module" src="app.js"></script>
   </head>
   <body>

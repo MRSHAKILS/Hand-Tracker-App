@@ -11,7 +11,11 @@ const types = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml"
+  ".svg": "image/svg+xml",
+  ".wasm": "application/wasm",
+  ".data": "application/octet-stream",
+  ".tflite": "application/octet-stream",
+  ".binarypb": "application/octet-stream"
 };
 
 const server = createServer((request, response) => {
