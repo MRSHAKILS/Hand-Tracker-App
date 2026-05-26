@@ -13,6 +13,8 @@ const DOT_SPACING = 8;
 const DOT_RADIUS = 5;
 const DOT_COLOR = "#ffd84d";
 const DOT_GLOW = "#ff5b9a";
+const CLEAR_HOLD_MS = 600;
+const CLEAR_FADE_FRAMES = 14;
 
 const surfaces = [
   { canvas: paintCanvas, ctx: paintCtx, persistent: true, lastW: 0, lastH: 0 },
@@ -24,6 +26,11 @@ const pen = {
   prevPoint: null,
   prevMidpoint: null,
   distanceLeft: 0
+};
+
+const clearHold = {
+  startedAt: null,
+  animating: false
 };
 
 let hands;
@@ -147,10 +154,10 @@ function dropDotsAlongCurve(p0, p1, p2) {
   }
 }
 
-function drawCursor(x, y, drawing) {
+function drawCursor(x, y, mode, clearProgress = 0) {
   cursorCtx.clearRect(0, 0, cursorCanvas.clientWidth, cursorCanvas.clientHeight);
 
-  if (drawing) {
+  if (mode === "draw") {
     cursorCtx.beginPath();
     cursorCtx.arc(x, y, DOT_RADIUS + 5, 0, Math.PI * 2);
     cursorCtx.fillStyle = "rgba(255, 216, 77, 0.85)";
@@ -158,6 +165,27 @@ function drawCursor(x, y, drawing) {
     cursorCtx.shadowBlur = 20;
     cursorCtx.fill();
     cursorCtx.shadowBlur = 0;
+    return;
+  }
+
+  if (mode === "clear") {
+    // Soft pink halo plus a charging progress arc.
+    cursorCtx.beginPath();
+    cursorCtx.arc(x, y, 22, 0, Math.PI * 2);
+    cursorCtx.fillStyle = "rgba(255, 91, 154, 0.18)";
+    cursorCtx.fill();
+
+    cursorCtx.beginPath();
+    cursorCtx.arc(x, y, 20, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * clearProgress);
+    cursorCtx.strokeStyle = "#ff5b9a";
+    cursorCtx.lineWidth = 4;
+    cursorCtx.lineCap = "round";
+    cursorCtx.stroke();
+
+    cursorCtx.beginPath();
+    cursorCtx.arc(x, y, 4, 0, Math.PI * 2);
+    cursorCtx.fillStyle = "#fff8d8";
+    cursorCtx.fill();
     return;
   }
 
@@ -171,6 +199,34 @@ function drawCursor(x, y, drawing) {
   cursorCtx.arc(x, y, 3, 0, Math.PI * 2);
   cursorCtx.fillStyle = "rgba(19, 200, 192, 0.95)";
   cursorCtx.fill();
+}
+
+function clearTrail() {
+  // Fades the persistent trail to nothing over a handful of frames using
+  // destination-out compositing, then clears any residue. Feels like a soft
+  // "puff" rather than a jarring instant wipe.
+  if (clearHold.animating) {
+    return;
+  }
+  clearHold.animating = true;
+
+  let frame = 0;
+  const step = () => {
+    paintCtx.save();
+    paintCtx.globalCompositeOperation = "destination-out";
+    paintCtx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    paintCtx.fillRect(0, 0, paintCanvas.clientWidth, paintCanvas.clientHeight);
+    paintCtx.restore();
+
+    frame += 1;
+    if (frame < CLEAR_FADE_FRAMES) {
+      requestAnimationFrame(step);
+    } else {
+      paintCtx.clearRect(0, 0, paintCanvas.clientWidth, paintCanvas.clientHeight);
+      clearHold.animating = false;
+    }
+  };
+  requestAnimationFrame(step);
 }
 
 function liftPen() {
@@ -190,15 +246,36 @@ function processFrame(results) {
   const landmarks = results.multiHandLandmarks?.[0];
   if (!landmarks?.length) {
     liftPen();
+    clearHold.startedAt = null;
     clearCursor();
     return;
   }
 
   const fingertip = landmarkToCanvas(landmarks[8]);
   const gesture = classifyGesture(landmarks);
-  const shouldDraw = gesture.indexUp && !gesture.middleUp;
+  const isClearGesture =
+    gesture.indexUp && gesture.middleUp && gesture.ringUp && gesture.pinkyUp;
+  const shouldDraw =
+    gesture.indexUp && !gesture.middleUp && !isClearGesture;
 
-  drawCursor(fingertip.x, fingertip.y, shouldDraw);
+  if (isClearGesture) {
+    liftPen();
+    if (clearHold.startedAt === null) {
+      clearHold.startedAt = performance.now();
+    }
+    const elapsed = performance.now() - clearHold.startedAt;
+    const progress = Math.min(1, elapsed / CLEAR_HOLD_MS);
+    drawCursor(fingertip.x, fingertip.y, "clear", progress);
+
+    if (progress >= 1) {
+      clearTrail();
+      clearHold.startedAt = null;
+    }
+    return;
+  }
+
+  clearHold.startedAt = null;
+  drawCursor(fingertip.x, fingertip.y, shouldDraw ? "draw" : "hover");
 
   if (!shouldDraw) {
     liftPen();
