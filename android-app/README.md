@@ -28,31 +28,9 @@ The first experience is intentionally warm and welcoming: a launch animation pla
 
 ## Screens
 
-### Paint Mode
-
-![Paint mode screenshot](docs/images/paint-mode.jpg)
-
-Paint mode is the free-draw mode. It lets the fingertip paint on the camera view using live hand tracking. The color palette changes the brush color, and the app keeps the drawing responsive while you move your hand around the screen.
-
-Paint mode includes:
-
-- Fingertip drawing on the camera feed
-- Color palette selection
-- Simple kid-friendly brush feedback
-- Screen capture support to save drawings
-
-### Game Mode
-
-![Game mode screenshot](docs/images/game-mode.jpg)
-
-Game mode is the spark-target challenge. A target appears and the hand tracker helps the app react as you move your finger through the camera view. It is designed to feel playful and rewarding without adding clutter.
-
-Game mode includes:
-
-- Spark target gameplay
-- Score tracking
-- Hand-driven interaction
-- Sound feedback for game actions
+| Paint Mode | Game Mode |
+| --- | --- |
+| <img src="docs/images/paint-mode.jpg" alt="Paint mode screenshot" width="220" /><br><br>Paint mode is the free-draw mode. It lets the fingertip paint on the camera view using live hand tracking. The color palette changes the brush color, and the app keeps the drawing responsive while you move your hand around the screen.<br><br>Paint mode includes:<br>- Fingertip drawing on the camera feed<br>- Color palette selection<br>- Simple kid-friendly brush feedback<br>- Screen capture support to save drawings | <img src="docs/images/game-mode.jpg" alt="Game mode screenshot" width="220" /><br><br>Game mode is the spark-target challenge. A target appears and the hand tracker helps the app react as you move your finger through the camera view. It is designed to feel playful and rewarding without adding clutter.<br><br>Game mode includes:<br>- Spark target gameplay<br>- Score tracking<br>- Hand-driven interaction<br>- Sound feedback for game actions |
 
 ## Tech Stack
 
