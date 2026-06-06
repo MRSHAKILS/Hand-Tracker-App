@@ -5,15 +5,12 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.Shader
 import android.os.SystemClock
 import android.util.AttributeSet
 import android.view.View
-import kotlin.math.cos
 import kotlin.math.min
-import kotlin.math.sin
 
 class SparkBackgroundView @JvmOverloads constructor(
     context: Context,
@@ -23,19 +20,6 @@ class SparkBackgroundView @JvmOverloads constructor(
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
-    private val handPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(210, 255, 248, 216)
-        style = Paint.Style.STROKE
-        strokeWidth = 7f
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
-    private val sparkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(255, 216, 77)
-        style = Paint.Style.FILL
-        setShadowLayer(18f, 0f, 0f, Color.rgb(255, 91, 154))
-    }
-    private val path = Path()
     private var startTime = SystemClock.uptimeMillis()
     private var running = false
 
@@ -68,8 +52,6 @@ class SparkBackgroundView @JvmOverloads constructor(
 
         val w = width.toFloat()
         val h = height.toFloat()
-        val t = ((SystemClock.uptimeMillis() - startTime) % 5000L) / 5000f
-
         backgroundPaint.shader = LinearGradient(
             0f,
             0f,
@@ -87,8 +69,6 @@ class SparkBackgroundView @JvmOverloads constructor(
 
         drawGlow(canvas, w * 0.22f, h * 0.18f, min(w, h) * 0.38f, Color.argb(95, 19, 200, 192))
         drawGlow(canvas, w * 0.82f, h * 0.24f, min(w, h) * 0.28f, Color.argb(75, 255, 91, 154))
-        drawHand(canvas, w, h, t)
-        drawSparks(canvas, w, h, t)
 
         if (running) {
             postInvalidateOnAnimation()
@@ -99,55 +79,5 @@ class SparkBackgroundView @JvmOverloads constructor(
         glowPaint.shader = RadialGradient(x, y, radius, color, Color.TRANSPARENT, Shader.TileMode.CLAMP)
         canvas.drawCircle(x, y, radius, glowPaint)
         glowPaint.shader = null
-    }
-
-    private fun drawHand(canvas: Canvas, w: Float, h: Float, t: Float) {
-        val size = min(w, h) * 0.5f
-        val cx = w * 0.5f
-        val cy = h * 0.43f + sin(t * FULL_TURN) * 8f
-        val top = cy - size * 0.32f
-        val palmTop = cy + size * 0.05f
-        val palmBottom = cy + size * 0.42f
-        val gap = size * 0.12f
-
-        path.reset()
-        path.moveTo(cx - gap * 1.5f, palmTop)
-        path.lineTo(cx - gap * 1.5f, top + size * 0.26f)
-        path.quadTo(cx - gap * 1.5f, top + size * 0.14f, cx - gap * 0.8f, top + size * 0.14f)
-        path.quadTo(cx - gap * 0.1f, top + size * 0.14f, cx - gap * 0.1f, top + size * 0.28f)
-        path.lineTo(cx - gap * 0.1f, top + size * 0.06f)
-        path.quadTo(cx - gap * 0.1f, top - size * 0.08f, cx + gap * 0.65f, top - size * 0.08f)
-        path.quadTo(cx + gap * 1.4f, top - size * 0.08f, cx + gap * 1.4f, top + size * 0.08f)
-        path.lineTo(cx + gap * 1.4f, top + size * 0.34f)
-        path.quadTo(cx + gap * 2.7f, top + size * 0.44f, cx + gap * 2.2f, palmTop)
-        path.lineTo(cx + gap * 1.65f, palmBottom)
-        path.quadTo(cx + gap * 0.2f, palmBottom + size * 0.12f, cx - gap * 1.8f, palmBottom)
-        path.lineTo(cx - gap * 2.8f, palmTop + size * 0.2f)
-        path.quadTo(cx - gap * 3.2f, palmTop + size * 0.1f, cx - gap * 2.7f, palmTop - size * 0.02f)
-        path.quadTo(cx - gap * 2.2f, palmTop - size * 0.1f, cx - gap * 1.5f, palmTop)
-        canvas.drawPath(path, handPaint)
-    }
-
-    private fun drawSparks(canvas: Canvas, w: Float, h: Float, t: Float) {
-        val cx = w * 0.55f
-        val cy = h * 0.3f + sin(t * FULL_TURN) * 8f
-        val baseRadius = min(w, h) * 0.17f
-
-        for (index in 0 until 9) {
-            val angle = FULL_TURN * (t + index / 9f)
-            val radius = baseRadius + sin(angle * 1.7f) * 18f
-            val x = cx + cos(angle) * radius
-            val y = cy + sin(angle) * radius * 0.58f
-            val dot = 4f + (index % 3) * 1.8f
-            sparkPaint.alpha = 130 + ((sin(angle) + 1f) * 45f).toInt()
-            canvas.drawCircle(x, y, dot, sparkPaint)
-        }
-
-        sparkPaint.alpha = 255
-        canvas.drawCircle(cx, cy, 13f + sin(t * FULL_TURN) * 2f, sparkPaint)
-    }
-
-    companion object {
-        private const val FULL_TURN = (Math.PI * 2).toFloat()
     }
 }

@@ -1,6 +1,8 @@
 package com.handtracker.fingerspark
 
 import android.Manifest
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
@@ -44,6 +46,9 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.core.widget.TextViewCompat
+import com.airbnb.lottie.FontAssetDelegate
+import com.airbnb.lottie.LottieAnimationView
+import com.airbnb.lottie.LottieDrawable
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -56,6 +61,9 @@ import java.util.concurrent.Executors
 class MainActivity : ComponentActivity() {
     private lateinit var rootView: FrameLayout
     private lateinit var sparkBackgroundView: SparkBackgroundView
+    private lateinit var galaxyCircleView: GalaxyCircleView
+    private lateinit var handAnimationView: LottieAnimationView
+    private lateinit var logoSplashView: LottieAnimationView
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: FingerOverlayView
     private lateinit var namePanel: View
@@ -88,9 +96,11 @@ class MainActivity : ComponentActivity() {
     private var currentLensFacing = CameraSelector.LENS_FACING_FRONT
     private var isCameraActive = false
     private var isDetecting = false
+    private var splashFinished = false
     private var isSoundEnabled = true
     private var currentPlayMode = FingerOverlayView.PlayMode.PAINT
     private var language = Language.ENGLISH
+    private val splashFallbackRunnable = Runnable { finishSplashScreen() }
 
     private val requestCameraPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -123,22 +133,19 @@ class MainActivity : ComponentActivity() {
                 }
             }
         )
-        if (savedUserName().isNullOrBlank()) {
-            showNameScreen()
-        } else {
-            showHomeScreen()
-        }
+        showSplashScreen()
     }
 
     override fun onStop() {
         super.onStop()
-        if (!isFinishing) {
+        if (!isFinishing && splashFinished) {
             showHomeScreen()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        controlsHandler.removeCallbacks(splashFallbackRunnable)
         handLandmarker?.close()
         toneGenerator?.release()
         analysisExecutor.shutdown()
@@ -154,6 +161,56 @@ class MainActivity : ComponentActivity() {
         }
 
         sparkBackgroundView = SparkBackgroundView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        galaxyCircleView = GalaxyCircleView(this).apply {
+            visibility = View.GONE
+            layoutParams = FrameLayout.LayoutParams(
+                dp(184),
+                dp(184)
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                topMargin = dp(116)
+            }
+        }
+
+        handAnimationView = LottieAnimationView(this).apply {
+            visibility = View.GONE
+            setAnimation("hand-lottie.json")
+            repeatCount = LottieDrawable.INFINITE
+            repeatMode = LottieDrawable.RESTART
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            layoutParams = FrameLayout.LayoutParams(
+                dp(220),
+                dp(220)
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                topMargin = dp(300)
+            }
+        }
+
+        logoSplashView = LottieAnimationView(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(Color.BLACK)
+            setAnimation("Loading Anmation.lottie")
+            setFontAssetDelegate(
+                object : FontAssetDelegate() {
+                    override fun fetchFont(fontFamily: String?): Typeface {
+                        return Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    }
+                }
+            )
+            setFailureListener {
+                Log.e(TAG, "Could not load splash animation", it)
+                finishSplashScreen()
+            }
+            repeatCount = 0
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(38), dp(38), dp(38), dp(38))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -188,11 +245,14 @@ class MainActivity : ComponentActivity() {
         namePanel = createNamePanel()
         homePanel = createHomePanel()
         rootView.addView(sparkBackgroundView)
+        rootView.addView(galaxyCircleView)
+        rootView.addView(handAnimationView)
         rootView.addView(previewView)
         rootView.addView(overlayView)
         rootView.addView(controlTray)
         rootView.addView(homePanel)
         rootView.addView(namePanel)
+        rootView.addView(logoSplashView)
         setContentView(rootView)
     }
 
@@ -432,13 +492,10 @@ class MainActivity : ComponentActivity() {
             setBackgroundResource(R.drawable.creator_panel_background)
         }
 
-        val photoSlot = ImageView(this).apply {
+        val photoSlot = CircleImageView(this).apply {
             contentDescription = "Creator photo"
             setImageResource(R.drawable.creator_photo)
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundResource(R.drawable.creator_photo_placeholder)
-            clipToOutline = true
-            setPadding(dp(2), dp(2), dp(2), dp(2))
         }
 
         val textStack = LinearLayout(this).apply {
@@ -634,9 +691,63 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun showSplashScreen() {
+        splashFinished = false
+        stopCameraSession()
+        sparkBackgroundView.visibility = View.GONE
+        galaxyCircleView.visibility = View.GONE
+        handAnimationView.pauseAnimation()
+        handAnimationView.visibility = View.GONE
+        previewView.visibility = View.GONE
+        overlayView.visibility = View.GONE
+        namePanel.visibility = View.GONE
+        homePanel.visibility = View.GONE
+        hideCameraControls(immediate = true)
+
+        logoSplashView.alpha = 1f
+        logoSplashView.visibility = View.VISIBLE
+        logoSplashView.bringToFront()
+        logoSplashView.removeAllAnimatorListeners()
+        logoSplashView.addAnimatorListener(
+            object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    finishSplashScreen()
+                }
+            }
+        )
+        logoSplashView.playAnimation()
+        controlsHandler.postDelayed(splashFallbackRunnable, SPLASH_FALLBACK_MS)
+    }
+
+    private fun finishSplashScreen() {
+        if (splashFinished) {
+            return
+        }
+
+        splashFinished = true
+        controlsHandler.removeCallbacks(splashFallbackRunnable)
+        logoSplashView.animate().cancel()
+        logoSplashView.cancelAnimation()
+        logoSplashView.visibility = View.GONE
+        logoSplashView.alpha = 1f
+        showEntryScreen()
+    }
+
+    private fun showEntryScreen() {
+        if (savedUserName().isNullOrBlank()) {
+            showNameScreen()
+        } else {
+            showHomeScreen()
+        }
+    }
+
     private fun showHomeScreen() {
         stopCameraSession()
+        logoSplashView.visibility = View.GONE
         sparkBackgroundView.visibility = View.VISIBLE
+        galaxyCircleView.visibility = View.VISIBLE
+        handAnimationView.visibility = View.VISIBLE
+        handAnimationView.playAnimation()
         previewView.visibility = View.GONE
         overlayView.visibility = View.GONE
         namePanel.visibility = View.GONE
@@ -649,7 +760,11 @@ class MainActivity : ComponentActivity() {
 
     private fun showNameScreen() {
         stopCameraSession()
+        logoSplashView.visibility = View.GONE
         sparkBackgroundView.visibility = View.VISIBLE
+        galaxyCircleView.visibility = View.VISIBLE
+        handAnimationView.visibility = View.VISIBLE
+        handAnimationView.playAnimation()
         previewView.visibility = View.GONE
         overlayView.visibility = View.GONE
         updateLanguageText()
@@ -661,7 +776,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showCameraScreen() {
+        logoSplashView.visibility = View.GONE
         sparkBackgroundView.visibility = View.GONE
+        galaxyCircleView.visibility = View.GONE
+        handAnimationView.pauseAnimation()
+        handAnimationView.visibility = View.GONE
         previewView.visibility = View.VISIBLE
         overlayView.visibility = View.VISIBLE
         overlayView.setPlayMode(currentPlayMode)
@@ -919,7 +1038,7 @@ class MainActivity : ComponentActivity() {
                 paintMode = "Paint",
                 gameMode = "Game",
                 creatorName = "শাকিলের তৈরি",
-                creatorInfo = "NSU-এর ইঞ্জিনিয়ার, কৌতূহলী শিশুদের জন্য খেলাধুলার প্রযুক্তি বানাচ্ছেন।",
+                creatorInfo = "NSUer ইঞ্জিনিয়ার, তোমার জন্য বানিয়েছি ।",
                 switchCamera = "ক্যামেরা বদলাও",
                 captureScreen = "ছবি তোলো",
                 soundOn = "সাউন্ড চালু",
@@ -1100,6 +1219,7 @@ class MainActivity : ComponentActivity() {
         private const val PINKY_TIP = 20
         private const val PINKY_PIP = 18
         private const val CONTROLS_VISIBLE_MS = 2600L
+        private const val SPLASH_FALLBACK_MS = 7000L
         private const val CAPTURE_DELAY_MS = 120L
         private const val PREFS_NAME = "finger_spark_prefs"
         private const val KEY_USER_NAME = "user_name"
