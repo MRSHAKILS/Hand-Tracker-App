@@ -9,6 +9,8 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Typeface
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -17,6 +19,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -27,6 +30,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -39,6 +43,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.widget.TextViewCompat
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.vision.core.RunningMode
@@ -50,25 +55,42 @@ import java.util.concurrent.Executors
 
 class MainActivity : ComponentActivity() {
     private lateinit var rootView: FrameLayout
+    private lateinit var sparkBackgroundView: SparkBackgroundView
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: FingerOverlayView
     private lateinit var namePanel: View
     private lateinit var homePanel: View
+    private lateinit var nameTitle: TextView
+    private lateinit var nameMessage: TextView
+    private lateinit var nameInput: EditText
+    private lateinit var nameSaveButton: Button
+    private lateinit var nameLanguageButton: Button
     private lateinit var homeTitle: TextView
+    private lateinit var homeMessage: TextView
+    private lateinit var startCameraButton: Button
+    private lateinit var gameButton: Button
+    private lateinit var homeLanguageButton: Button
+    private lateinit var creatorName: TextView
+    private lateinit var creatorInfo: TextView
     private lateinit var controlTray: LinearLayout
     private lateinit var backHomeButton: ImageButton
     private lateinit var captureButton: ImageButton
     private lateinit var exitButton: ImageButton
+    private lateinit var soundButton: ImageButton
     private lateinit var switchCameraButton: ImageButton
     private lateinit var analysisExecutor: ExecutorService
 
     private var handLandmarker: HandLandmarker? = null
     private var cameraProvider: ProcessCameraProvider? = null
+    private var toneGenerator: ToneGenerator? = null
     private val controlsHandler = Handler(Looper.getMainLooper())
     private val hideControlsRunnable = Runnable { hideCameraControls() }
     private var currentLensFacing = CameraSelector.LENS_FACING_FRONT
     private var isCameraActive = false
     private var isDetecting = false
+    private var isSoundEnabled = true
+    private var currentPlayMode = FingerOverlayView.PlayMode.PAINT
+    private var language = Language.ENGLISH
 
     private val requestCameraPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -83,7 +105,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         analysisExecutor = Executors.newSingleThreadExecutor()
+        toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
+        language = savedLanguage()
         createLayout()
+        overlayView.onSparkCaptured = ::playSparkSound
         onBackPressedDispatcher.addCallback(
             this,
             object : OnBackPressedCallback(true) {
@@ -115,6 +140,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         handLandmarker?.close()
+        toneGenerator?.release()
         analysisExecutor.shutdown()
     }
 
@@ -127,7 +153,15 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        sparkBackgroundView = SparkBackgroundView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
         previewView = PreviewView(this).apply {
+            visibility = View.GONE
             scaleType = PreviewView.ScaleType.FILL_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             layoutParams = FrameLayout.LayoutParams(
@@ -137,6 +171,7 @@ class MainActivity : ComponentActivity() {
         }
 
         overlayView = FingerOverlayView(this).apply {
+            visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -152,6 +187,7 @@ class MainActivity : ComponentActivity() {
         controlTray = createControlTray()
         namePanel = createNamePanel()
         homePanel = createHomePanel()
+        rootView.addView(sparkBackgroundView)
         rootView.addView(previewView)
         rootView.addView(overlayView)
         rootView.addView(controlTray)
@@ -182,6 +218,15 @@ class MainActivity : ComponentActivity() {
             background = R.drawable.round_button_blue,
             onClick = ::captureScreen
         )
+        soundButton = createControlButton(
+            description = "Sound on",
+            icon = R.drawable.ic_sound_on,
+            background = R.drawable.round_button_mint,
+            onClick = {
+                toggleSound()
+                showCameraControls()
+            }
+        )
         exitButton = createControlButton(
             description = getString(R.string.exit_app),
             icon = R.drawable.ic_exit_app,
@@ -199,6 +244,7 @@ class MainActivity : ComponentActivity() {
             addView(backHomeButton)
             addView(switchCameraButton)
             addView(captureButton)
+            addView(soundButton)
             addView(exitButton)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -233,11 +279,28 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun createHomePanel(): View {
+        val container = FrameLayout(this).apply {
+            visibility = View.GONE
+            isClickable = true
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val scrollPanel = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(40, 40, 40, 40)
-            setBackgroundColor(Color.rgb(23, 34, 47))
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            setPadding(dp(34), dp(420), dp(34), dp(54))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -245,101 +308,271 @@ class MainActivity : ComponentActivity() {
         }
 
         homeTitle = TextView(this).apply {
-            text = getString(R.string.permission_title)
             setTextColor(Color.rgb(255, 248, 216))
             textSize = 44f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
+            maxLines = 2
+            TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                this,
+                28,
+                44,
+                2,
+                TypedValue.COMPLEX_UNIT_SP
+            )
+            setShadowLayer(8f, 0f, 5f, Color.argb(150, 0, 0, 0))
         }
 
-        val message = TextView(this).apply {
-            text = getString(R.string.permission_message)
+        homeMessage = TextView(this).apply {
             setTextColor(Color.rgb(255, 248, 216))
             textSize = 17f
             gravity = Gravity.CENTER
-            setPadding(0, 24, 0, 32)
+            maxLines = 4
+            setPadding(0, dp(24), 0, dp(32))
+            setShadowLayer(5f, 0f, 3f, Color.argb(130, 0, 0, 0))
         }
 
-        val button = Button(this).apply {
-            text = getString(R.string.start_camera)
+        startCameraButton = Button(this).apply {
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.rgb(23, 34, 47))
-            setBackgroundColor(Color.rgb(255, 216, 77))
+            setBackgroundResource(R.drawable.button_primary)
+            minHeight = dp(56)
+            minWidth = dp(210)
             setOnClickListener {
-                if (hasCameraPermission()) {
-                    showCameraScreen()
-                } else {
-                    requestCameraPermission.launch(Manifest.permission.CAMERA)
-                }
+                startMode(FingerOverlayView.PlayMode.PAINT)
+            }
+        }
+
+        gameButton = Button(this).apply {
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(23, 34, 47))
+            setBackgroundResource(R.drawable.button_primary)
+            minHeight = dp(56)
+            minWidth = dp(210)
+            setOnClickListener {
+                startMode(FingerOverlayView.PlayMode.GAME)
+            }
+        }
+
+        val creatorPanel = createCreatorPanel()
+
+        homeLanguageButton = Button(this).apply {
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(255, 248, 216))
+            setBackgroundResource(R.drawable.button_language_circle)
+            minWidth = 0
+            minHeight = 0
+            includeFontPadding = false
+            setOnClickListener {
+                toggleLanguage()
             }
         }
 
         panel.addView(homeTitle)
-        panel.addView(message)
+        panel.addView(homeMessage)
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        modeRow.addView(
+            startCameraButton,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dp(8)
+            }
+        )
+        modeRow.addView(
+            gameButton,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginStart = dp(8)
+            }
+        )
         panel.addView(
-            button,
+            modeRow,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginStart = 32
-                marginEnd = 32
+                marginStart = dp(24)
+                marginEnd = dp(24)
             }
+        )
+        panel.addView(
+            creatorPanel,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(28)
+                marginStart = dp(10)
+                marginEnd = dp(10)
+            }
+        )
+
+        scrollPanel.addView(panel)
+        container.addView(scrollPanel)
+        container.addView(
+            homeLanguageButton,
+            FrameLayout.LayoutParams(dp(54), dp(54)).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = dp(24)
+                marginEnd = dp(22)
+            }
+        )
+        return container
+    }
+
+    private fun createCreatorPanel(): View {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setBackgroundResource(R.drawable.creator_panel_background)
+        }
+
+        val photoSlot = ImageView(this).apply {
+            contentDescription = "Creator photo"
+            setImageResource(R.drawable.creator_photo)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundResource(R.drawable.creator_photo_placeholder)
+            clipToOutline = true
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        }
+
+        val textStack = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        creatorName = TextView(this).apply {
+            setTextColor(Color.rgb(255, 248, 216))
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+        }
+
+        creatorInfo = TextView(this).apply {
+            setTextColor(Color.rgb(223, 243, 238))
+            textSize = 13f
+            maxLines = 2
+        }
+
+        textStack.addView(creatorName)
+        textStack.addView(
+            creatorInfo,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(2)
+            }
+        )
+
+        panel.addView(
+            photoSlot,
+            LinearLayout.LayoutParams(dp(54), dp(54)).apply {
+                marginEnd = dp(12)
+            }
+        )
+        panel.addView(
+            textStack,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         )
 
         return panel
     }
 
     private fun createNamePanel(): View {
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(36), dp(40), dp(36), dp(40))
-            setBackgroundColor(Color.rgb(23, 34, 47))
+        val container = FrameLayout(this).apply {
+            visibility = View.GONE
+            isClickable = true
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
 
-        val title = TextView(this).apply {
-            text = getString(R.string.name_title)
+        val scrollPanel = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            setPadding(dp(36), dp(420), dp(36), dp(72))
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+
+        nameLanguageButton = Button(this).apply {
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(255, 248, 216))
+            setBackgroundResource(R.drawable.button_language_circle)
+            minWidth = 0
+            minHeight = 0
+            includeFontPadding = false
+            setOnClickListener {
+                toggleLanguage()
+            }
+        }
+
+        nameTitle = TextView(this).apply {
             setTextColor(Color.rgb(255, 248, 216))
             textSize = 38f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
+            maxLines = 2
+            TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                this,
+                26,
+                38,
+                2,
+                TypedValue.COMPLEX_UNIT_SP
+            )
+            setShadowLayer(8f, 0f, 5f, Color.argb(150, 0, 0, 0))
         }
 
-        val message = TextView(this).apply {
-            text = getString(R.string.name_message)
+        nameMessage = TextView(this).apply {
             setTextColor(Color.rgb(255, 248, 216))
             textSize = 17f
             gravity = Gravity.CENTER
+            maxLines = 4
             setPadding(0, dp(22), 0, dp(24))
+            setShadowLayer(5f, 0f, 3f, Color.argb(130, 0, 0, 0))
         }
 
-        val nameInput = EditText(this).apply {
-            hint = getString(R.string.name_hint)
+        nameInput = EditText(this).apply {
             textSize = 20f
             setSingleLine(true)
             setTextColor(Color.rgb(23, 34, 47))
             setHintTextColor(Color.rgb(84, 96, 111))
-            setPadding(dp(18), dp(10), dp(18), dp(10))
-            setBackgroundColor(Color.rgb(255, 248, 216))
+            setBackgroundResource(R.drawable.input_name)
+            minHeight = dp(56)
+            maxLines = 1
         }
 
-        val button = Button(this).apply {
-            text = getString(R.string.save_name)
+        nameSaveButton = Button(this).apply {
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.rgb(23, 34, 47))
-            setBackgroundColor(Color.rgb(255, 216, 77))
+            setBackgroundResource(R.drawable.button_primary)
+            minHeight = dp(56)
+            minWidth = dp(210)
             setOnClickListener {
                 val name = nameInput.text.toString().trim()
 
                 if (name.isBlank()) {
-                    Toast.makeText(this@MainActivity, R.string.name_needed, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, copy().nameNeeded, Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
 
@@ -348,8 +581,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        panel.addView(title)
-        panel.addView(message)
+        panel.addView(nameTitle)
+        panel.addView(nameMessage)
         panel.addView(
             nameInput,
             LinearLayout.LayoutParams(
@@ -362,7 +595,7 @@ class MainActivity : ComponentActivity() {
             }
         )
         panel.addView(
-            button,
+            nameSaveButton,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -372,7 +605,17 @@ class MainActivity : ComponentActivity() {
             }
         )
 
-        return panel
+        scrollPanel.addView(panel)
+        container.addView(scrollPanel)
+        container.addView(
+            nameLanguageButton,
+            FrameLayout.LayoutParams(dp(54), dp(54)).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = dp(24)
+                marginEnd = dp(22)
+            }
+        )
+        return container
     }
 
     private fun hasCameraPermission(): Boolean {
@@ -382,34 +625,58 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
+    private fun startMode(mode: FingerOverlayView.PlayMode) {
+        currentPlayMode = mode
+        if (hasCameraPermission()) {
+            showCameraScreen()
+        } else {
+            requestCameraPermission.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     private fun showHomeScreen() {
         stopCameraSession()
+        sparkBackgroundView.visibility = View.VISIBLE
+        previewView.visibility = View.GONE
+        overlayView.visibility = View.GONE
         namePanel.visibility = View.GONE
-        homeTitle.text = savedUserName()?.let { getString(R.string.home_greeting, it) }
-            ?: getString(R.string.permission_title)
+        updateLanguageText()
         homePanel.visibility = View.VISIBLE
+        homePanel.bringToFront()
         hideCameraControls(immediate = true)
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun showNameScreen() {
         stopCameraSession()
+        sparkBackgroundView.visibility = View.VISIBLE
+        previewView.visibility = View.GONE
+        overlayView.visibility = View.GONE
+        updateLanguageText()
         homePanel.visibility = View.GONE
         namePanel.visibility = View.VISIBLE
+        namePanel.bringToFront()
         hideCameraControls(immediate = true)
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun showCameraScreen() {
+        sparkBackgroundView.visibility = View.GONE
+        previewView.visibility = View.VISIBLE
+        overlayView.visibility = View.VISIBLE
+        overlayView.setPlayMode(currentPlayMode)
         namePanel.visibility = View.GONE
         homePanel.visibility = View.GONE
+        overlayView.resetGame()
         hideCameraControls(immediate = true)
+        controlTray.bringToFront()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         startCamera()
     }
 
     private fun showCameraControls() {
         controlsHandler.removeCallbacks(hideControlsRunnable)
+        controlTray.bringToFront()
         controlTray.visibility = View.VISIBLE
         controlTray.animate()
             .alpha(1f)
@@ -458,10 +725,10 @@ class MainActivity : ComponentActivity() {
             {
                 try {
                     saveScreenshot(buildScreenshot())
-                    Toast.makeText(this, R.string.capture_saved, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, copy().captureSaved, Toast.LENGTH_SHORT).show()
                 } catch (error: Exception) {
                     Log.e(TAG, "Could not save screenshot", error)
-                    Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, copy().captureFailed, Toast.LENGTH_SHORT).show()
                 }
             },
             CAPTURE_DELAY_MS
@@ -537,6 +804,134 @@ class MainActivity : ComponentActivity() {
             .apply()
     }
 
+    private fun savedLanguage(): Language {
+        val savedCode = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_LANGUAGE, Language.ENGLISH.code)
+
+        return Language.entries.firstOrNull { it.code == savedCode } ?: Language.ENGLISH
+    }
+
+    private fun saveLanguage() {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LANGUAGE, language.code)
+            .apply()
+    }
+
+    private fun toggleLanguage() {
+        language = if (language == Language.ENGLISH) {
+            Language.BANGLA
+        } else {
+            Language.ENGLISH
+        }
+        saveLanguage()
+        updateLanguageText()
+    }
+
+    private fun updateLanguageText() {
+        val text = copy()
+        val userName = savedUserName()
+
+        nameLanguageButton.text = text.languageButton
+        nameTitle.text = text.nameTitle
+        nameMessage.text = text.nameMessage
+        nameInput.hint = text.nameHint
+        nameSaveButton.text = text.saveName
+
+        homeLanguageButton.text = text.languageButton
+        homeTitle.text = userName?.let { text.homeGreeting.format(it) } ?: text.appName
+        homeMessage.text = text.homeMessage
+        startCameraButton.text = text.paintMode
+        gameButton.text = text.gameMode
+        creatorName.text = text.creatorName
+        creatorInfo.text = text.creatorInfo
+
+        backHomeButton.contentDescription = text.backHome
+        switchCameraButton.contentDescription = text.switchCamera
+        captureButton.contentDescription = text.captureScreen
+        exitButton.contentDescription = text.exitApp
+        updateSoundButton(text)
+    }
+
+    private fun toggleSound() {
+        isSoundEnabled = !isSoundEnabled
+        updateSoundButton(copy())
+        if (isSoundEnabled) {
+            playSparkSound()
+        }
+    }
+
+    private fun updateSoundButton(text: UiCopy) {
+        if (!::soundButton.isInitialized) {
+            return
+        }
+
+        soundButton.setImageResource(
+            if (isSoundEnabled) R.drawable.ic_sound_on else R.drawable.ic_sound_off
+        )
+        soundButton.contentDescription = if (isSoundEnabled) text.soundOn else text.soundOff
+    }
+
+    private fun playSparkSound() {
+        if (!isSoundEnabled) {
+            return
+        }
+
+        toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 85)
+    }
+
+    private fun copy(): UiCopy {
+        return when (language) {
+            Language.ENGLISH -> UiCopy(
+                languageButton = "Bn",
+                appName = "Finger Spark",
+                nameTitle = "What is your name?",
+                nameMessage = "Type your name to start your Finger Spark adventure.",
+                nameHint = "Your name",
+                saveName = "Let's play",
+                nameNeeded = "Please enter a name",
+                homeGreeting = "Hi, %s!",
+                homeMessage = "Choose Paint to draw or Game to catch spark targets.",
+                paintMode = "Paint",
+                gameMode = "Game",
+                creatorName = "Built by Shakil",
+                creatorInfo = "Engineer from NSU, building playful tech for curious kids.",
+                switchCamera = "Switch camera",
+                captureScreen = "Capture screen",
+                soundOn = "Sound on",
+                soundOff = "Sound off",
+                captureSaved = "Saved to Pictures/Finger Spark",
+                captureFailed = "Could not save screenshot",
+                backHome = "Back to home",
+                exitApp = "Exit app"
+            )
+
+            Language.BANGLA -> UiCopy(
+                languageButton = "En",
+                appName = "ফিঙ্গার স্পার্ক",
+                nameTitle = "তোমার নাম কী?",
+                nameMessage = "ফিঙ্গার স্পার্ক শুরু করতে তোমার নাম লিখো।",
+                nameHint = "তোমার নাম",
+                saveName = "চলো খেলি",
+                nameNeeded = "দয়া করে নাম লিখো",
+                homeGreeting = "হাই, %s!",
+                homeMessage = "আঁকতে Paint বা স্পার্ক ধরতে Game বেছে নাও।",
+                paintMode = "Paint",
+                gameMode = "Game",
+                creatorName = "শাকিলের তৈরি",
+                creatorInfo = "NSU-এর ইঞ্জিনিয়ার, কৌতূহলী শিশুদের জন্য খেলাধুলার প্রযুক্তি বানাচ্ছেন।",
+                switchCamera = "ক্যামেরা বদলাও",
+                captureScreen = "ছবি তোলো",
+                soundOn = "সাউন্ড চালু",
+                soundOff = "সাউন্ড বন্ধ",
+                captureSaved = "Pictures/Finger Spark-এ সেভ হয়েছে",
+                captureFailed = "ছবি সেভ করা যায়নি",
+                backHome = "হোমে ফিরে যাও",
+                exitApp = "অ্যাপ বন্ধ করো"
+            )
+        }
+    }
+
     private fun startCamera() {
         setupHandLandmarker()
 
@@ -606,16 +1001,22 @@ class MainActivity : ComponentActivity() {
             .setMinTrackingConfidence(0.65f)
             .setResultListener { result, image ->
                 isDetecting = false
-                val fingertip = result.landmarks().firstOrNull()?.getOrNull(INDEX_FINGER_TIP)
+                val landmarks = result.landmarks().firstOrNull()
+                val fingertip = landmarks?.getOrNull(INDEX_FINGER_TIP)
                 runOnUiThread {
-                    if (fingertip == null) {
+                    if (landmarks == null || fingertip == null) {
                         overlayView.clearFingertip()
                     } else {
-                        overlayView.setFingertip(
+                        overlayView.setHandState(
                             fingertip.x(),
                             fingertip.y(),
                             image.width,
-                            image.height
+                            image.height,
+                            isFingerExtended(landmarks, INDEX_FINGER_TIP, INDEX_FINGER_PIP),
+                            isFingerExtended(landmarks, MIDDLE_FINGER_TIP, MIDDLE_FINGER_PIP),
+                            isFingerExtended(landmarks, RING_FINGER_TIP, RING_FINGER_PIP),
+                            isFingerExtended(landmarks, PINKY_TIP, PINKY_PIP),
+                            handSize(landmarks)
                         )
                     }
                 }
@@ -627,6 +1028,24 @@ class MainActivity : ComponentActivity() {
             .build()
 
         handLandmarker = HandLandmarker.createFromOptions(this, options)
+    }
+
+    private fun isFingerExtended(
+        landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>,
+        tipIndex: Int,
+        pipIndex: Int
+    ): Boolean {
+        return landmarks[tipIndex].y() < landmarks[pipIndex].y()
+    }
+
+    private fun handSize(
+        landmarks: List<com.google.mediapipe.tasks.components.containers.NormalizedLandmark>
+    ): Float {
+        val wrist = landmarks[WRIST]
+        val middleMcp = landmarks[MIDDLE_FINGER_MCP]
+        val dx = wrist.x() - middleMcp.x()
+        val dy = wrist.y() - middleMcp.y()
+        return kotlin.math.sqrt(dx * dx + dy * dy)
     }
 
     private fun analyzeFrame(imageProxy: ImageProxy) {
@@ -670,10 +1089,49 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val TAG = "FingerSpark"
         private const val MODEL_ASSET = "hand_landmarker.task"
+        private const val WRIST = 0
         private const val INDEX_FINGER_TIP = 8
+        private const val INDEX_FINGER_PIP = 6
+        private const val MIDDLE_FINGER_MCP = 9
+        private const val MIDDLE_FINGER_TIP = 12
+        private const val MIDDLE_FINGER_PIP = 10
+        private const val RING_FINGER_TIP = 16
+        private const val RING_FINGER_PIP = 14
+        private const val PINKY_TIP = 20
+        private const val PINKY_PIP = 18
         private const val CONTROLS_VISIBLE_MS = 2600L
         private const val CAPTURE_DELAY_MS = 120L
         private const val PREFS_NAME = "finger_spark_prefs"
         private const val KEY_USER_NAME = "user_name"
+        private const val KEY_LANGUAGE = "language"
     }
 }
+
+private enum class Language(val code: String) {
+    ENGLISH("en"),
+    BANGLA("bn")
+}
+
+private data class UiCopy(
+    val languageButton: String,
+    val appName: String,
+    val nameTitle: String,
+    val nameMessage: String,
+    val nameHint: String,
+    val saveName: String,
+    val nameNeeded: String,
+    val homeGreeting: String,
+    val homeMessage: String,
+    val paintMode: String,
+    val gameMode: String,
+    val creatorName: String,
+    val creatorInfo: String,
+    val switchCamera: String,
+    val captureScreen: String,
+    val soundOn: String,
+    val soundOff: String,
+    val captureSaved: String,
+    val captureFailed: String,
+    val backHome: String,
+    val exitApp: String
+)
