@@ -15,6 +15,8 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -37,18 +39,23 @@ class MainActivity : ComponentActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var overlayView: FingerOverlayView
     private lateinit var permissionPanel: View
+    private lateinit var switchCameraButton: ImageButton
     private lateinit var analysisExecutor: ExecutorService
 
     private var handLandmarker: HandLandmarker? = null
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var currentLensFacing = CameraSelector.LENS_FACING_FRONT
     private var isDetecting = false
 
     private val requestCameraPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
                 permissionPanel.visibility = View.GONE
+                switchCameraButton.visibility = View.VISIBLE
                 startCamera()
             } else {
                 permissionPanel.visibility = View.VISIBLE
+                switchCameraButton.visibility = View.GONE
             }
         }
 
@@ -60,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
         if (hasCameraPermission()) {
             permissionPanel.visibility = View.GONE
+            switchCameraButton.visibility = View.VISIBLE
             startCamera()
         }
     }
@@ -95,11 +103,32 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+        switchCameraButton = createSwitchCameraButton()
         permissionPanel = createPermissionPanel()
         root.addView(previewView)
         root.addView(overlayView)
+        root.addView(switchCameraButton)
         root.addView(permissionPanel)
         setContentView(root)
+    }
+
+    private fun createSwitchCameraButton(): ImageButton {
+        return ImageButton(this).apply {
+            visibility = View.GONE
+            contentDescription = getString(R.string.switch_camera)
+            setImageResource(R.drawable.ic_switch_camera)
+            setBackgroundResource(R.drawable.round_button_yellow)
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(18, 18, 18, 18)
+            setOnClickListener {
+                switchCamera()
+            }
+            layoutParams = FrameLayout.LayoutParams(72, 72).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = 42
+                marginEnd = 24
+            }
+        }
     }
 
     private fun createPermissionPanel(): View {
@@ -170,28 +199,49 @@ class MainActivity : ComponentActivity() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener(
             {
-                val cameraProvider = cameraProviderFuture.get()
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-                val analysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .build()
-                    .also {
-                        it.setAnalyzer(analysisExecutor, ::analyzeFrame)
-                    }
-
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview,
-                    analysis
-                )
+                cameraProvider = cameraProviderFuture.get()
+                bindCamera(currentLensFacing)
             },
             ContextCompat.getMainExecutor(this)
         )
+    }
+
+    private fun switchCamera() {
+        val nextLensFacing = if (currentLensFacing == CameraSelector.LENS_FACING_FRONT) {
+            CameraSelector.LENS_FACING_BACK
+        } else {
+            CameraSelector.LENS_FACING_FRONT
+        }
+
+        bindCamera(nextLensFacing)
+    }
+
+    private fun bindCamera(lensFacing: Int) {
+        val provider = cameraProvider ?: return
+        val selector = CameraSelector.Builder()
+            .requireLensFacing(lensFacing)
+            .build()
+
+        if (!provider.hasCamera(selector)) {
+            return
+        }
+
+        val preview = Preview.Builder().build().also {
+            it.setSurfaceProvider(previewView.surfaceProvider)
+        }
+        val analysis = ImageAnalysis.Builder()
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .build()
+            .also {
+                it.setAnalyzer(analysisExecutor, ::analyzeFrame)
+            }
+
+        isDetecting = false
+        overlayView.clearFingertip()
+        provider.unbindAll()
+        provider.bindToLifecycle(this, selector, preview, analysis)
+        currentLensFacing = lensFacing
     }
 
     private fun setupHandLandmarker() {
@@ -242,8 +292,8 @@ class MainActivity : ComponentActivity() {
 
         try {
             val bitmap = imageProxy.toBitmap()
-            val mirroredBitmap = bitmap.rotateAndMirror(imageProxy.imageInfo.rotationDegrees)
-            val mpImage = BitmapImageBuilder(mirroredBitmap).build()
+            val orientedBitmap = bitmap.orientForLandmarker(imageProxy.imageInfo.rotationDegrees)
+            val mpImage = BitmapImageBuilder(orientedBitmap).build()
             isDetecting = true
             handLandmarker?.detectAsync(mpImage, SystemClock.uptimeMillis())
         } catch (error: Exception) {
@@ -262,15 +312,14 @@ class MainActivity : ComponentActivity() {
         return bitmap
     }
 
-    private fun Bitmap.rotateAndMirror(rotationDegrees: Int): Bitmap {
-        val rotateMatrix = Matrix().apply {
+    private fun Bitmap.orientForLandmarker(rotationDegrees: Int): Bitmap {
+        val matrix = Matrix().apply {
             postRotate(rotationDegrees.toFloat())
+            if (currentLensFacing == CameraSelector.LENS_FACING_FRONT) {
+                postScale(-1f, 1f)
+            }
         }
-        val upright = Bitmap.createBitmap(this, 0, 0, width, height, rotateMatrix, true)
-        val mirrorMatrix = Matrix().apply {
-            preScale(-1f, 1f)
-        }
-        return Bitmap.createBitmap(upright, 0, 0, upright.width, upright.height, mirrorMatrix, true)
+        return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
     }
 
     companion object {
