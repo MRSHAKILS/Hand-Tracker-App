@@ -1,8 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Finger Spark</string>
+    <string name="name_title">What is your name?</string>
+    <string name="name_message">Type your name to start your Finger Spark adventure.</string>
+    <string name="name_hint">Your name</string>
+    <string name="save_name">Let\'s play</string>
+    <string name="name_needed">Please enter a name</string>
     <string name="permission_title">Finger Spark</string>
+    <string name="home_greeting">Hi, %1$s!</string>
     <string name="permission_message">Camera permission is needed to follow your index finger.</string>
     <string name="start_camera">Start Camera</string>
     <string name="switch_camera">Switch camera</string>
+    <string name="capture_screen">Capture screen</string>
+    <string name="capture_saved">Saved to Pictures/Finger Spark</string>
+    <string name="capture_failed">Could not save screenshot</string>
+    <string name="back_home">Back to home</string>
+    <string name="exit_app">Exit app</string>
 </resources>
