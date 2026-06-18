@@ -58,17 +58,18 @@ class SparkBackgroundView @JvmOverloads constructor(
             w,
             h,
             intArrayOf(
-                Color.rgb(23, 34, 47),
-                Color.rgb(20, 77, 90),
-                Color.rgb(14, 44, 64)
+                Color.rgb(6, 12, 22),
+                Color.rgb(10, 22, 36),
+                Color.rgb(14, 34, 50)
             ),
-            floatArrayOf(0f, 0.55f, 1f),
+            floatArrayOf(0f, 0.58f, 1f),
             Shader.TileMode.CLAMP
         )
         canvas.drawRect(0f, 0f, w, h, backgroundPaint)
 
-        drawGlow(canvas, w * 0.22f, h * 0.18f, min(w, h) * 0.38f, Color.argb(95, 19, 200, 192))
-        drawGlow(canvas, w * 0.82f, h * 0.24f, min(w, h) * 0.28f, Color.argb(75, 255, 91, 154))
+        drawGlow(canvas, w * 0.2f, h * 0.16f, min(w, h) * 0.36f, Color.argb(88, 36, 213, 195))
+        drawGlow(canvas, w * 0.82f, h * 0.22f, min(w, h) * 0.26f, Color.argb(72, 255, 123, 147))
+        drawGlow(canvas, w * 0.5f, h * 0.82f, min(w, h) * 0.22f, Color.argb(48, 255, 216, 111))
 
         if (running) {
             postInvalidateOnAnimation()

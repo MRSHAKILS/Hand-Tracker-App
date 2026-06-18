@@ -170,11 +170,11 @@ class MainActivity : ComponentActivity() {
         galaxyCircleView = GalaxyCircleView(this).apply {
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
-                dp(184),
-                dp(184)
+                dp(172),
+                dp(172)
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = dp(116)
+                topMargin = dp(104)
             }
         }
 
@@ -185,11 +185,11 @@ class MainActivity : ComponentActivity() {
             repeatMode = LottieDrawable.RESTART
             scaleType = ImageView.ScaleType.FIT_CENTER
             layoutParams = FrameLayout.LayoutParams(
-                dp(220),
-                dp(220)
+                dp(196),
+                dp(196)
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = dp(300)
+                topMargin = dp(292)
             }
         }
 
@@ -360,7 +360,7 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(dp(34), dp(420), dp(34), dp(54))
+            setPadding(dp(30), dp(392), dp(30), dp(48))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -368,28 +368,28 @@ class MainActivity : ComponentActivity() {
         }
 
         homeTitle = TextView(this).apply {
-            setTextColor(Color.rgb(255, 248, 216))
-            textSize = 44f
+            setTextColor(Color.rgb(247, 241, 217))
+            textSize = 40f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             maxLines = 2
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
-                28,
-                44,
+                26,
+                40,
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
-            setShadowLayer(8f, 0f, 5f, Color.argb(150, 0, 0, 0))
+            setShadowLayer(10f, 0f, 6f, Color.argb(160, 0, 0, 0))
         }
 
         homeMessage = TextView(this).apply {
-            setTextColor(Color.rgb(255, 248, 216))
+            setTextColor(Color.rgb(211, 227, 231))
             textSize = 17f
             gravity = Gravity.CENTER
             maxLines = 4
-            setPadding(0, dp(24), 0, dp(32))
-            setShadowLayer(5f, 0f, 3f, Color.argb(130, 0, 0, 0))
+            setPadding(0, dp(18), 0, dp(28))
+            setShadowLayer(4f, 0f, 2f, Color.argb(110, 0, 0, 0))
         }
 
         startCameraButton = Button(this).apply {
@@ -421,7 +421,7 @@ class MainActivity : ComponentActivity() {
         homeLanguageButton = Button(this).apply {
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(255, 248, 216))
+            setTextColor(Color.rgb(247, 241, 217))
             setBackgroundResource(R.drawable.button_language_circle)
             minWidth = 0
             minHeight = 0
@@ -504,14 +504,14 @@ class MainActivity : ComponentActivity() {
         }
 
         creatorName = TextView(this).apply {
-            setTextColor(Color.rgb(255, 248, 216))
+            setTextColor(Color.rgb(247, 241, 217))
             textSize = 15f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
         }
 
         creatorInfo = TextView(this).apply {
-            setTextColor(Color.rgb(223, 243, 238))
+            setTextColor(Color.rgb(189, 214, 220))
             textSize = 13f
             maxLines = 2
         }
@@ -563,7 +563,7 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(dp(36), dp(420), dp(36), dp(72))
+            setPadding(dp(30), dp(392), dp(30), dp(66))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -584,28 +584,28 @@ class MainActivity : ComponentActivity() {
         }
 
         nameTitle = TextView(this).apply {
-            setTextColor(Color.rgb(255, 248, 216))
-            textSize = 38f
+            setTextColor(Color.rgb(247, 241, 217))
+            textSize = 36f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             maxLines = 2
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
-                26,
-                38,
+                24,
+                36,
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
-            setShadowLayer(8f, 0f, 5f, Color.argb(150, 0, 0, 0))
+            setShadowLayer(10f, 0f, 6f, Color.argb(160, 0, 0, 0))
         }
 
         nameMessage = TextView(this).apply {
-            setTextColor(Color.rgb(255, 248, 216))
+            setTextColor(Color.rgb(211, 227, 231))
             textSize = 17f
             gravity = Gravity.CENTER
             maxLines = 4
-            setPadding(0, dp(22), 0, dp(24))
-            setShadowLayer(5f, 0f, 3f, Color.argb(130, 0, 0, 0))
+            setPadding(0, dp(18), 0, dp(22))
+            setShadowLayer(4f, 0f, 2f, Color.argb(110, 0, 0, 0))
         }
 
         nameInput = EditText(this).apply {
