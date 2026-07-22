@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/images/readme-poster.png" alt="Finger Spark - playful offline hand tracking on Android" width="100%" />
+  <img src="android-app/docs/images/readme-poster.png" alt="Finger Spark - playful offline hand tracking on Android" width="100%" />
 
   # Finger Spark
 
@@ -21,12 +21,12 @@ The project began with a child's question: *What do you do with the knowledge yo
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/images/paint-mode.jpg" alt="Paint mode drawing with an index finger" width="240" />
+      <img src="android-app/docs/images/paint-mode.jpg" alt="Paint mode drawing with an index finger" width="240" />
       <h3>Paint</h3>
       <p>Draw glowing strokes by moving one raised index finger. Hold the fingertip over a palette color to select it, or hold four fingers up to clear the canvas.</p>
     </td>
     <td width="50%" align="center">
-      <img src="docs/images/game-mode.jpg" alt="Game mode catching spark targets" width="240" />
+      <img src="android-app/docs/images/game-mode.jpg" alt="Game mode catching spark targets" width="240" />
       <h3>Game</h3>
       <p>Guide the glowing fingertip cursor into each spark target. Every successful catch increases the score, moves the target, and can play sound feedback.</p>
     </td>
