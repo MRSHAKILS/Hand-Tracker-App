@@ -75,8 +75,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var nameLanguageButton: Button
     private lateinit var homeTitle: TextView
     private lateinit var homeMessage: TextView
-    private lateinit var startCameraButton: Button
-    private lateinit var gameButton: Button
+    private lateinit var paintModeCard: LinearLayout
+    private lateinit var gameModeCard: LinearLayout
     private lateinit var homeLanguageButton: Button
     private lateinit var creatorName: TextView
     private lateinit var creatorInfo: TextView
@@ -338,7 +338,93 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun createModeCard(
+        title: String,
+        subtitle: String,
+        icon: Int,
+        accentBackground: Int,
+        onClick: () -> Unit
+    ): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = true
+            isFocusable = true
+            setBackgroundResource(R.drawable.mode_card_surface)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setOnClickListener { onClick() }
+        }
+
+        val iconShell = FrameLayout(this).apply {
+            setBackgroundResource(accentBackground)
+            layoutParams = LinearLayout.LayoutParams(dp(50), dp(50)).apply {
+                marginEnd = dp(12)
+            }
+        }
+
+        val iconView = ImageView(this).apply {
+            setImageResource(icon)
+            setColorFilter(Color.rgb(23, 34, 47))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+        }
+
+        iconShell.addView(
+            iconView,
+            FrameLayout.LayoutParams(dp(24), dp(24)).apply {
+                gravity = Gravity.CENTER
+            }
+        )
+
+        val textStack = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val titleView = TextView(this).apply {
+            this.text = title
+            setTextColor(Color.rgb(247, 241, 217))
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+        }
+
+        val subtitleView = TextView(this).apply {
+            this.text = subtitle
+            setTextColor(Color.rgb(189, 214, 220))
+            textSize = 12.5f
+            maxLines = 2
+        }
+
+        textStack.addView(titleView)
+        textStack.addView(
+            subtitleView,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(2)
+            }
+        )
+
+        card.addView(iconShell)
+        card.addView(
+            textStack,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        )
+        card.addView(
+            ImageView(this).apply {
+                setImageResource(android.R.drawable.ic_media_next)
+                setColorFilter(Color.rgb(189, 214, 220))
+                alpha = 0.8f
+            },
+            LinearLayout.LayoutParams(dp(18), dp(18))
+        )
+
+        return card
+    }
+
     private fun createHomePanel(): View {
+        val text = copy()
         val container = FrameLayout(this).apply {
             visibility = View.GONE
             isClickable = true
@@ -360,7 +446,7 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(dp(30), dp(392), dp(30), dp(48))
+            setPadding(dp(28), dp(360), dp(28), dp(44))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -369,52 +455,44 @@ class MainActivity : ComponentActivity() {
 
         homeTitle = TextView(this).apply {
             setTextColor(Color.rgb(247, 241, 217))
-            textSize = 40f
+            textSize = 36f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             maxLines = 2
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
                 26,
-                40,
+                36,
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
-            setShadowLayer(10f, 0f, 6f, Color.argb(160, 0, 0, 0))
+            setShadowLayer(8f, 0f, 4f, Color.argb(140, 0, 0, 0))
         }
 
         homeMessage = TextView(this).apply {
             setTextColor(Color.rgb(211, 227, 231))
-            textSize = 17f
+            textSize = 16f
             gravity = Gravity.CENTER
-            maxLines = 4
-            setPadding(0, dp(18), 0, dp(28))
-            setShadowLayer(4f, 0f, 2f, Color.argb(110, 0, 0, 0))
+            maxLines = 3
+            setPadding(0, dp(14), 0, dp(20))
+            setShadowLayer(3f, 0f, 2f, Color.argb(90, 0, 0, 0))
         }
 
-        startCameraButton = Button(this).apply {
-            textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(23, 34, 47))
-            setBackgroundResource(R.drawable.button_primary)
-            minHeight = dp(56)
-            minWidth = dp(210)
-            setOnClickListener {
-                startMode(FingerOverlayView.PlayMode.PAINT)
-            }
-        }
+        paintModeCard = createModeCard(
+            title = text.paintMode,
+            subtitle = text.paintModeInfo,
+            icon = R.drawable.ic_paint_mode,
+            accentBackground = R.drawable.round_button_mint,
+            onClick = { startMode(FingerOverlayView.PlayMode.PAINT) }
+        )
 
-        gameButton = Button(this).apply {
-            textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(23, 34, 47))
-            setBackgroundResource(R.drawable.button_primary)
-            minHeight = dp(56)
-            minWidth = dp(210)
-            setOnClickListener {
-                startMode(FingerOverlayView.PlayMode.GAME)
-            }
-        }
+        gameModeCard = createModeCard(
+            title = text.gameMode,
+            subtitle = text.gameModeInfo,
+            icon = R.drawable.ic_game_mode,
+            accentBackground = R.drawable.round_button_coral,
+            onClick = { startMode(FingerOverlayView.PlayMode.GAME) }
+        )
 
         val creatorPanel = createCreatorPanel()
 
@@ -433,30 +511,27 @@ class MainActivity : ComponentActivity() {
 
         panel.addView(homeTitle)
         panel.addView(homeMessage)
-        val modeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-        modeRow.addView(
-            startCameraButton,
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = dp(8)
-            }
-        )
-        modeRow.addView(
-            gameButton,
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginStart = dp(8)
-            }
-        )
         panel.addView(
-            modeRow,
+            paintModeCard,
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginStart = dp(24)
-                marginEnd = dp(24)
+                topMargin = dp(8)
+                marginStart = dp(10)
+                marginEnd = dp(10)
+                bottomMargin = dp(12)
+            }
+        )
+        panel.addView(
+            gameModeCard,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                marginStart = dp(10)
+                marginEnd = dp(10)
+                bottomMargin = dp(16)
             }
         )
         panel.addView(
@@ -465,9 +540,8 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                topMargin = dp(28)
-                marginStart = dp(10)
-                marginEnd = dp(10)
+                marginStart = dp(6)
+                marginEnd = dp(6)
             }
         )
 
@@ -488,7 +562,7 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            setPadding(dp(12), dp(11), dp(12), dp(11))
             setBackgroundResource(R.drawable.creator_panel_background)
         }
 
@@ -505,14 +579,14 @@ class MainActivity : ComponentActivity() {
 
         creatorName = TextView(this).apply {
             setTextColor(Color.rgb(247, 241, 217))
-            textSize = 15f
+            textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
         }
 
         creatorInfo = TextView(this).apply {
             setTextColor(Color.rgb(189, 214, 220))
-            textSize = 13f
+            textSize = 12f
             maxLines = 2
         }
 
@@ -529,7 +603,7 @@ class MainActivity : ComponentActivity() {
 
         panel.addView(
             photoSlot,
-            LinearLayout.LayoutParams(dp(54), dp(54)).apply {
+            LinearLayout.LayoutParams(dp(48), dp(48)).apply {
                 marginEnd = dp(12)
             }
         )
@@ -563,7 +637,7 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(dp(30), dp(392), dp(30), dp(66))
+            setPadding(dp(28), dp(360), dp(28), dp(60))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -573,7 +647,7 @@ class MainActivity : ComponentActivity() {
         nameLanguageButton = Button(this).apply {
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(255, 248, 216))
+            setTextColor(Color.rgb(247, 241, 217))
             setBackgroundResource(R.drawable.button_language_circle)
             minWidth = 0
             minHeight = 0
@@ -585,34 +659,34 @@ class MainActivity : ComponentActivity() {
 
         nameTitle = TextView(this).apply {
             setTextColor(Color.rgb(247, 241, 217))
-            textSize = 36f
+            textSize = 34f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             maxLines = 2
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
                 24,
-                36,
+                34,
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
-            setShadowLayer(10f, 0f, 6f, Color.argb(160, 0, 0, 0))
+            setShadowLayer(8f, 0f, 4f, Color.argb(140, 0, 0, 0))
         }
 
         nameMessage = TextView(this).apply {
             setTextColor(Color.rgb(211, 227, 231))
-            textSize = 17f
+            textSize = 16f
             gravity = Gravity.CENTER
-            maxLines = 4
-            setPadding(0, dp(18), 0, dp(22))
-            setShadowLayer(4f, 0f, 2f, Color.argb(110, 0, 0, 0))
+            maxLines = 3
+            setPadding(0, dp(14), 0, dp(18))
+            setShadowLayer(3f, 0f, 2f, Color.argb(90, 0, 0, 0))
         }
 
         nameInput = EditText(this).apply {
             textSize = 20f
             setSingleLine(true)
-            setTextColor(Color.rgb(23, 34, 47))
-            setHintTextColor(Color.rgb(84, 96, 111))
+            setTextColor(Color.rgb(11, 18, 29))
+            setHintTextColor(Color.rgb(110, 122, 137))
             setBackgroundResource(R.drawable.input_name)
             minHeight = dp(56)
             maxLines = 1
@@ -960,8 +1034,8 @@ class MainActivity : ComponentActivity() {
         homeLanguageButton.text = text.languageButton
         homeTitle.text = userName?.let { text.homeGreeting.format(it) } ?: text.appName
         homeMessage.text = text.homeMessage
-        startCameraButton.text = text.paintMode
-        gameButton.text = text.gameMode
+        updateModeCardText(paintModeCard, text.paintMode, text.paintModeInfo)
+        updateModeCardText(gameModeCard, text.gameMode, text.gameModeInfo)
         creatorName.text = text.creatorName
         creatorInfo.text = text.creatorInfo
 
@@ -991,6 +1065,12 @@ class MainActivity : ComponentActivity() {
         soundButton.contentDescription = if (isSoundEnabled) text.soundOn else text.soundOff
     }
 
+    private fun updateModeCardText(card: LinearLayout, title: String, subtitle: String) {
+        val textStack = card.getChildAt(1) as? LinearLayout ?: return
+        (textStack.getChildAt(0) as? TextView)?.text = title
+        (textStack.getChildAt(1) as? TextView)?.text = subtitle
+    }
+
     private fun playSparkSound() {
         if (!isSoundEnabled) {
             return
@@ -1010,9 +1090,11 @@ class MainActivity : ComponentActivity() {
                 saveName = "Let's play",
                 nameNeeded = "Please enter a name",
                 homeGreeting = "Hi, %s!",
-                homeMessage = "Choose Paint to draw or Game to catch spark targets.",
+                homeMessage = "Pick a mode and play with your hand.",
                 paintMode = "Paint",
+                paintModeInfo = "Draw with your fingertip.",
                 gameMode = "Game",
+                gameModeInfo = "Catch the glowing sparks.",
                 creatorName = "Built by Shakil",
                 creatorInfo = "Engineer from NSU, building playful tech for curious kids.",
                 switchCamera = "Switch camera",
@@ -1034,9 +1116,11 @@ class MainActivity : ComponentActivity() {
                 saveName = "চলো খেলি",
                 nameNeeded = "দয়া করে নাম লিখো",
                 homeGreeting = "হাই, %s!",
-                homeMessage = "আঁকতে Paint বা স্পার্ক ধরতে Game বেছে নাও।",
+                homeMessage = "একটা mode বেছে নাও, তারপর খেলো।",
                 paintMode = "Paint",
+                paintModeInfo = "আঙুল দিয়ে আঁকো।",
                 gameMode = "Game",
+                gameModeInfo = "উজ্জ্বল spark ধরো।",
                 creatorName = "শাকিলের তৈরি",
                 creatorInfo = "NSUer ইঞ্জিনিয়ার, তোমার জন্য বানিয়েছি ।",
                 switchCamera = "ক্যামেরা বদলাও",
@@ -1243,7 +1327,9 @@ private data class UiCopy(
     val homeGreeting: String,
     val homeMessage: String,
     val paintMode: String,
+    val paintModeInfo: String,
     val gameMode: String,
+    val gameModeInfo: String,
     val creatorName: String,
     val creatorInfo: String,
     val switchCamera: String,

@@ -28,7 +28,7 @@ class GalaxyCircleView @JvmOverloads constructor(
     }
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        maskFilter = BlurMaskFilter(24f, BlurMaskFilter.Blur.NORMAL)
+        maskFilter = BlurMaskFilter(18f, BlurMaskFilter.Blur.NORMAL)
     }
     private val ringBounds = RectF()
     private var startTime = SystemClock.uptimeMillis()
@@ -66,31 +66,29 @@ class GalaxyCircleView @JvmOverloads constructor(
         val cx = w / 2f
         val cy = h / 2f
         val elapsed = (SystemClock.uptimeMillis() - startTime) / 1000f
-        val radius = size * 0.34f
+        val radius = size * 0.31f
 
         glowPaint.shader = RadialGradient(
             cx,
             cy,
-            size * 0.48f,
+            size * 0.44f,
             intArrayOf(
-                Color.argb(90, 63, 220, 202),
-                Color.argb(42, 255, 112, 166),
+                Color.argb(72, 63, 220, 202),
+                Color.argb(30, 255, 112, 166),
                 Color.TRANSPARENT
             ),
             floatArrayOf(0f, 0.48f, 1f),
             Shader.TileMode.CLAMP
         )
-        canvas.drawCircle(cx, cy, size * 0.43f, glowPaint)
+        canvas.drawCircle(cx, cy, size * 0.38f, glowPaint)
         glowPaint.shader = null
 
         ringBounds.set(cx - radius, cy - radius, cx + radius, cy + radius)
-        drawRing(canvas, elapsed * 28f, 255f, 85f, Color.argb(175, 91, 231, 219))
-        drawRing(canvas, elapsed * -36f, 42f, 72f, Color.argb(155, 255, 142, 181))
-        drawRing(canvas, elapsed * 20f, 176f, 58f, Color.argb(120, 255, 230, 139))
+        drawRing(canvas, elapsed * 22f, 248f, 88f, Color.argb(165, 91, 231, 219))
+        drawRing(canvas, elapsed * -18f, 38f, 48f, Color.argb(82, 255, 230, 139))
 
-        drawOrbitDot(canvas, cx, cy, radius, elapsed, 0f, Color.argb(240, 255, 244, 171), 5.5f)
-        drawOrbitDot(canvas, cx, cy, radius * 0.82f, elapsed, 2.2f, Color.argb(235, 125, 242, 224), 4.5f)
-        drawOrbitDot(canvas, cx, cy, radius * 1.05f, elapsed, 4.1f, Color.argb(225, 255, 143, 176), 4f)
+        drawOrbitDot(canvas, cx, cy, radius, elapsed, 0f, Color.argb(220, 255, 244, 171), 5f)
+        drawOrbitDot(canvas, cx, cy, radius * 0.86f, elapsed, 2.1f, Color.argb(200, 125, 242, 224), 4f)
 
         if (running) {
             postInvalidateOnAnimation()
