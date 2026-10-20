@@ -5,3 +5,5 @@ android-sdk/
 app/build/
 build/
 local.properties
+.signing/
+release-artifacts/

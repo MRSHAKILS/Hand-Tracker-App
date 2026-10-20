@@ -11,12 +11,25 @@ android {
         applicationId = "com.handtracker.fingerspark"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.0.0"
     }
 
     buildFeatures {
         buildConfig = false
+    }
+
+    val releaseKeyStore = providers.environmentVariable("FINGER_SPARK_KEYSTORE").orNull
+    if (releaseKeyStore != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseKeyStore)
+                storePassword = providers.environmentVariable("FINGER_SPARK_STORE_PASSWORD").get()
+                keyAlias = "fingerspark"
+                keyPassword = providers.environmentVariable("FINGER_SPARK_STORE_PASSWORD").get()
+            }
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("release")
     }
 
     compileOptions {

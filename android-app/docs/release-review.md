@@ -59,8 +59,8 @@ remaining acceptance checks, not claimed passes:
 - Exercise name entry with keyboard, large fonts, long names, Bangla, and display cutouts.
 - Confirm camera indicator shutdown and no continuing animation after app exit.
 
-Release signing, store publication, and broad device qualification remain outside
-the current development build.
+Signed APK packaging is available through `build-release.ps1` and GitHub Releases.
+Play Store publication and broad device qualification remain pending.
 
 ## Implementation Reference
 

@@ -4,6 +4,20 @@ Native Android hand tracking with two interaction modes: fingertip painting and 
 
 The repository also contains the original browser prototype. The Android application is a separate Kotlin project; it does not embed the web app.
 
+## Download Android APK
+
+**[Download Finger Spark v1.0.0 - signed APK](https://github.com/MRSHAKILS/Hand-Tracker-App/releases/download/v1.0.0/Finger-Spark-v1.0.0.apk)**
+
+[Release notes and SHA-256 checksum](https://github.com/MRSHAKILS/Hand-Tracker-App/releases/tag/v1.0.0)
+
+Requires Android 7.0 / API 24 or newer and a camera. This is a preview release: automated checks pass, but physical-device acceptance is still pending. The installed app runs offline.
+
+1. Download the APK on the Android phone.
+2. Open it and allow installation from the browser or file manager if prompted.
+3. Install Finger Spark, then grant camera permission when choosing a mode.
+
+An earlier debug APK must be uninstalled first because its signing certificate differs from this release. Uninstalling clears the saved name/language and Android 7-9 app-specific captures. Android 10+ gallery captures are stored separately.
+
 ## Capabilities
 
 | Area | Implementation |
@@ -186,7 +200,25 @@ The debug APK is generated at:
 android-app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-A debug APK is intended for development and manual testing. A production release requires a release signing configuration.
+A debug APK is intended for development and manual testing. Its signing certificate differs from the published release.
+
+### Signed Release Build
+
+On Windows, from `android-app`:
+
+```powershell
+.\build-release.ps1
+```
+
+The script creates a local RSA release key on first use, then runs release assembly, release lint, and release unit tests. Subsequent builds reuse that key. Add `-Offline` after dependencies have been cached.
+
+```text
+android-app/app/build/outputs/apk/release/app-release.apk
+```
+
+Signing files are stored under `android-app/.signing/` and excluded from Git. The password is encrypted for the current Windows account. Preserve the keystore and its password in a secure backup: future APK updates require the same signing key. Do not generate a replacement for an existing published app.
+
+For a build environment with an existing key, Gradle also accepts `FINGER_SPARK_KEYSTORE` and `FINGER_SPARK_STORE_PASSWORD`; the configured key alias is `fingerspark`. Signing secrets are not committed to the repository.
 
 ### Install
 
@@ -229,7 +261,9 @@ Verification for this revision:
 | Check | Result |
 | --- | --- |
 | Debug APK assembly | Passed |
+| Signed release assembly | Passed for v1.0.0; release certificate and version metadata verified |
 | Android lint | Passed with no errors; dependency-version and portrait-orientation warnings remain |
+| Release lint and unit tests | Passed; 17 release-variant tests |
 | Local regression tests | 17 passed: session invalidation, frame ownership, crop mapping, visible target placement, screen-space hits, and capture cancellation |
 | Packaged APK permissions | Inspected to verify camera access and the absence of internet permission |
 | Native 16 KB alignment | All bundled arm64-v8a/x86_64 load segments meet 16 KB alignment; APK ZIP alignment check passed |
@@ -248,7 +282,7 @@ Additional constraints:
 - Lighting, camera quality, motion blur, and device performance affect tracking.
 - Sound state, score, and drawings are not persisted.
 - Android 7-9 captures use app-specific storage.
-- Release signing, store distribution, and release-device compatibility testing are not configured.
+- The signed APK is distributed through GitHub Releases. Play Store distribution and release-device compatibility testing remain pending.
 
 See [design direction](android-app/docs/design-direction.md) for the UI brief and visual rules.
 See [release-readiness review](android-app/docs/release-review.md) for the audit brief, confirmed fixes, and remaining device checks.
