@@ -16,7 +16,6 @@ import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 class FingerOverlayView @JvmOverloads constructor(
     context: Context,
@@ -489,9 +488,10 @@ class FingerOverlayView @JvmOverloads constructor(
 
     private fun captureTargetIfTouched(x: Float, y: Float) {
         val now = SystemClock.uptimeMillis()
-        val dx = x - targetX
-        val dy = y - targetY
-        if (sqrt(dx * dx + dy * dy) <= TARGET_RADIUS && now - lastCaptureMs > CAPTURE_COOLDOWN_MS) {
+        val geometry = geometry() ?: return
+        val hitRadius = 44f + 8f * resources.displayMetrics.density
+        if (geometry.isTargetHit(x, y, targetX, targetY, hitRadius)
+            && now - lastCaptureMs > CAPTURE_COOLDOWN_MS) {
             score += 1
             lastCaptureMs = now
             moveTarget()
@@ -542,7 +542,6 @@ class FingerOverlayView @JvmOverloads constructor(
 
     private companion object {
         private const val MAX_TRAIL_POINTS = 9
-        private const val TARGET_RADIUS = 0.085f
         private const val CAPTURE_COOLDOWN_MS = 450L
         private const val CLEAR_HOLD_MS = 600L
         private const val SWATCH_HOLD_MS = 450L

@@ -5,6 +5,8 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -13,6 +15,7 @@ import android.graphics.Matrix
 import android.graphics.Typeface
 import android.media.AudioManager
 import android.media.ToneGenerator
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -20,8 +23,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.text.InputFilter
+import android.text.TextUtils
 import android.view.inputmethod.InputMethodManager
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
@@ -44,12 +49,14 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.core.widget.TextViewCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnLayout
 import com.airbnb.lottie.FontAssetDelegate
 import com.airbnb.lottie.LottieAnimationView
 import com.airbnb.lottie.LottieDrawable
@@ -93,6 +100,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var soundButton: ImageButton
     private lateinit var switchCameraButton: ImageButton
     private lateinit var analysisExecutor: ExecutorService
+    private lateinit var captureExecutor: ExecutorService
 
     private var handLandmarker: HandLandmarker? = null
     private var cameraProvider: ProcessCameraProvider? = null
@@ -103,6 +111,7 @@ class MainActivity : ComponentActivity() {
     private var isCameraActive = false
     private val trackingSession = TrackingSession()
     private var capturePending = false
+    private var pendingCaptureRunnable: Runnable? = null
     private var splashFinished = false
     private var isSoundEnabled = true
     private var currentPlayMode = FingerOverlayView.PlayMode.PAINT
@@ -111,10 +120,13 @@ class MainActivity : ComponentActivity() {
 
     private val requestCameraPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (isFinishing || isDestroyed) return@registerForActivityResult
+            if (!splashFinished) finishSplashScreen()
             if (granted) {
                 showCameraScreen()
             } else {
-                showHomeScreen()
+                showEntryScreen()
+                showPermissionHelp()
             }
         }
 
@@ -122,6 +134,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         analysisExecutor = Executors.newSingleThreadExecutor()
+        captureExecutor = Executors.newSingleThreadExecutor()
+        currentPlayMode = savedInstanceState?.getString("play_mode")?.let {
+            runCatching { FingerOverlayView.PlayMode.valueOf(it) }.getOrNull()
+        } ?: FingerOverlayView.PlayMode.PAINT
         toneGenerator = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 70) }.getOrNull()
         language = savedLanguage()
         createLayout()
@@ -141,6 +157,11 @@ class MainActivity : ComponentActivity() {
             }
         )
         showSplashScreen()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("play_mode", currentPlayMode.name)
+        super.onSaveInstanceState(outState)
     }
 
     override fun onStop() {
@@ -176,10 +197,12 @@ class MainActivity : ComponentActivity() {
         controlsHandler.removeCallbacksAndMessages(null)
         stopCameraSession()
         handAnimationView.cancelAnimation()
+        logoSplashView.removeAllAnimatorListeners()
         logoSplashView.cancelAnimation()
         toneGenerator?.release()
         analysisExecutor.execute { handLandmarker?.close() }
         analysisExecutor.shutdown()
+        captureExecutor.shutdown()
     }
 
     private fun createLayout() {
@@ -508,6 +531,7 @@ class MainActivity : ComponentActivity() {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
                 26,
@@ -824,6 +848,11 @@ class MainActivity : ComponentActivity() {
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(SparkStyle.ink)
             gravity = Gravity.CENTER_VERTICAL
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
+                this, 12, 20, 1, TypedValue.COMPLEX_UNIT_SP
+            )
             setBackgroundColor(SparkStyle.surface)
         }, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)
@@ -849,6 +878,25 @@ class MainActivity : ComponentActivity() {
         } else {
             requestCameraPermission.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun showPermissionHelp() {
+        val english = language == Language.ENGLISH
+        val canRetry = shouldShowRequestPermissionRationale(Manifest.permission.CAMERA)
+        AlertDialog.Builder(this)
+            .setTitle(if (english) "Camera access" else "ক্যামেরার অনুমতি")
+            .setMessage(if (english) "Allow camera access to use Paint and Game. Frames are processed on this phone."
+                else "Paint এবং Game-এর জন্য ক্যামেরার অনুমতি দাও। ছবি এই ফোনেই প্রসেস হয়।")
+            .setNegativeButton(if (english) "Cancel" else "বাতিল", null)
+            .setPositiveButton(if (canRetry) {
+                if (english) "Try again" else "আবার চেষ্টা করো"
+            } else {
+                if (english) "Settings" else "সেটিংস"
+            }) { _, _ ->
+                if (canRetry) startMode(currentPlayMode)
+                else startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            }
+            .show()
     }
 
     private fun showSplashScreen() {
@@ -880,7 +928,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun finishSplashScreen() {
-        if (splashFinished) {
+        if (splashFinished || isFinishing || isDestroyed) {
             return
         }
 
@@ -956,7 +1004,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showCameraControls() {
+        if (!isCameraActive) return
         controlsHandler.removeCallbacks(hideControlsRunnable)
+        controlTray.animate().cancel()
         controlTray.bringToFront()
         controlTray.visibility = View.VISIBLE
         controlTray.animate()
@@ -991,6 +1041,11 @@ class MainActivity : ComponentActivity() {
     private fun stopCameraSession() {
         isCameraActive = false
         trackingSession.stop()
+        pendingCaptureRunnable?.let {
+            controlsHandler.removeCallbacks(it)
+            pendingCaptureRunnable = null
+            capturePending = false
+        }
         overlayView.clearFingertip()
         cameraProvider?.unbindAll()
     }
@@ -1002,58 +1057,79 @@ class MainActivity : ComponentActivity() {
 
     private fun captureScreen() {
         if (!isCameraActive || capturePending) return
+        val session = trackingSession.currentSession() ?: return
         capturePending = true
         hideCameraControls(immediate = true)
-        controlsHandler.postDelayed(
-            {
-                try {
-                    if (isCameraActive && !isFinishing) {
-                        val screenshot = buildScreenshot()
-                        try {
-                            saveScreenshot(screenshot)
-                        } finally {
-                            screenshot.recycle()
-                        }
-                        val message = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) copy().captureSaved
+        val capture = Runnable {
+            pendingCaptureRunnable = null
+            if (!trackingSession.isCurrent(session) || isFinishing) {
+                capturePending = false
+                return@Runnable
+            }
+            val screenshot = try {
+                buildScreenshot()
+            } catch (error: Exception) {
+                capturePending = false
+                Log.e(TAG, "Could not compose capture", error)
+                Toast.makeText(this, copy().captureFailed, Toast.LENGTH_SHORT).show()
+                return@Runnable
+            }
+            captureExecutor.execute {
+                val saved = try {
+                    check(trackingSession.isCurrent(session))
+                    saveScreenshot(screenshot, session)
+                    true
+                } catch (error: Exception) {
+                    Log.e(TAG, "Could not save screenshot", error)
+                    false
+                } finally {
+                    screenshot.recycle()
+                }
+                runOnUiThread {
+                    capturePending = false
+                    if (!isDestroyed && !isFinishing && trackingSession.isCurrent(session)) {
+                        val message = if (!saved) copy().captureFailed
+                            else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) copy().captureSaved
                             else copy().captureSavedLegacy
                         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
                     }
-                } catch (error: Exception) {
-                    Log.e(TAG, "Could not save screenshot", error)
-                    Toast.makeText(this, copy().captureFailed, Toast.LENGTH_SHORT).show()
-                } finally {
-                    capturePending = false
                 }
-            },
-            CAPTURE_DELAY_MS
-        )
+            }
+        }
+        pendingCaptureRunnable = capture
+        controlsHandler.postDelayed(capture, CAPTURE_DELAY_MS)
     }
 
     private fun buildScreenshot(): Bitmap {
         val previewBitmap = previewView.bitmap ?: throw IllegalStateException("Camera preview is not ready")
-        val screenshot = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(screenshot)
         try {
-            val srcWidth = previewBitmap.width.toFloat()
-            val srcHeight = previewBitmap.height.toFloat()
-            val scale = maxOf(previewView.width / srcWidth, previewView.height / srcHeight)
-            val drawnWidth = srcWidth * scale
-            val drawnHeight = srcHeight * scale
-            val left = (previewView.width - drawnWidth) / 2f
-            val top = (previewView.height - drawnHeight) / 2f
-            val matrix = Matrix().apply {
-                postScale(scale, scale)
-                postTranslate(left, top)
+            val screenshot = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
+            try {
+                val canvas = Canvas(screenshot)
+                val srcWidth = previewBitmap.width.toFloat()
+                val srcHeight = previewBitmap.height.toFloat()
+                val scale = maxOf(previewView.width / srcWidth, previewView.height / srcHeight)
+                val drawnWidth = srcWidth * scale
+                val drawnHeight = srcHeight * scale
+                val left = (previewView.width - drawnWidth) / 2f
+                val top = (previewView.height - drawnHeight) / 2f
+                val matrix = Matrix().apply {
+                    postScale(scale, scale)
+                    postTranslate(left, top)
+                }
+                canvas.drawBitmap(previewBitmap, matrix, null)
+                overlayView.draw(canvas)
+                return screenshot
+            } catch (error: Exception) {
+                screenshot.recycle()
+                throw error
             }
-            canvas.drawBitmap(previewBitmap, matrix, null)
         } finally {
             previewBitmap.recycle()
         }
-        overlayView.draw(canvas)
-        return screenshot
     }
 
-    private fun saveScreenshot(bitmap: Bitmap) {
+    private fun saveScreenshot(bitmap: Bitmap, session: Long) {
         val filename = "finger-spark-${System.currentTimeMillis()}.png"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1069,22 +1145,34 @@ class MainActivity : ComponentActivity() {
 
             try {
                 resolver.openOutputStream(uri)?.use { output ->
-                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                    val cancellable = CaptureOutputStream(output) { trackingSession.isCurrent(session) }
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, cancellable))
                 } ?: throw IllegalStateException("Could not open image output stream")
+                check(trackingSession.isCurrent(session))
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
+                check(resolver.update(uri, values, null, null) == 1) { "Could not publish capture" }
             } catch (error: Exception) {
-                resolver.delete(uri, null, null)
+                runCatching { resolver.delete(uri, null, null) }.exceptionOrNull()?.let(error::addSuppressed)
                 throw error
             }
             return
         }
 
-        val directory = File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Finger Spark")
-        directory.mkdirs()
-        FileOutputStream(File(directory, filename)).use { output ->
-            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+        val pictures = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+            ?: throw IllegalStateException("App picture storage is unavailable")
+        val directory = File(pictures, "Finger Spark")
+        check(directory.isDirectory || directory.mkdirs()) { "Could not create picture directory" }
+        val file = File(directory, filename)
+        try {
+            FileOutputStream(file).use { output ->
+                val cancellable = CaptureOutputStream(output) { trackingSession.isCurrent(session) }
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, cancellable))
+            }
+            check(trackingSession.isCurrent(session))
+        } catch (error: Exception) {
+            file.delete()
+            throw error
         }
     }
 
@@ -1255,20 +1343,46 @@ class MainActivity : ComponentActivity() {
     private fun startCamera() {
         val session = trackingSession.start()
         isCameraActive = true
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-        cameraProviderFuture.addListener(
-            {
-                if (!trackingSession.isCurrent(session) || isFinishing || isDestroyed) return@addListener
-                try {
-                    setupHandLandmarker()
-                    cameraProvider = cameraProviderFuture.get()
-                    bindCamera(currentLensFacing, session)
-                } catch (error: Exception) {
-                    cameraFailed(error)
-                }
-            },
-            ContextCompat.getMainExecutor(this)
-        )
+        previewView.doOnLayout {
+            if (!trackingSession.isCurrent(session)) return@doOnLayout
+            try {
+                val future = ProcessCameraProvider.getInstance(this)
+                future.addListener({
+                    if (!trackingSession.isCurrent(session) || isFinishing || isDestroyed) return@addListener
+                    try {
+                        val provider = future.get()
+                        cameraProvider = provider
+                        val preferred = CameraSelector.Builder().requireLensFacing(currentLensFacing).build()
+                        val lens = if (provider.hasCamera(preferred)) currentLensFacing
+                            else if (currentLensFacing == CameraSelector.LENS_FACING_FRONT) CameraSelector.LENS_FACING_BACK
+                            else CameraSelector.LENS_FACING_FRONT
+                        analysisExecutor.execute {
+                            if (!trackingSession.isCurrent(session)) return@execute
+                            try {
+                                setupHandLandmarker()
+                                runOnUiThread {
+                                    if (trackingSession.isCurrent(session)) {
+                                        try {
+                                            bindCamera(lens, session)
+                                        } catch (error: Exception) {
+                                            cameraFailed(error)
+                                        }
+                                    }
+                                }
+                            } catch (error: Exception) {
+                                runOnUiThread {
+                                    if (trackingSession.isCurrent(session)) cameraFailed(error)
+                                }
+                            }
+                        }
+                    } catch (error: Exception) {
+                        cameraFailed(error)
+                    }
+                }, ContextCompat.getMainExecutor(this))
+            } catch (error: Exception) {
+                cameraFailed(error)
+            }
+        }
     }
 
     private fun switchCamera() {
@@ -1316,7 +1430,12 @@ class MainActivity : ComponentActivity() {
 
         overlayView.clearFingertip()
         provider.unbindAll()
-        provider.bindToLifecycle(this, selector, preview, analysis)
+        val group = UseCaseGroup.Builder()
+            .setViewPort(checkNotNull(previewView.viewPort) { "Preview layout is not ready" })
+            .addUseCase(preview)
+            .addUseCase(analysis)
+            .build()
+        provider.bindToLifecycle(this, selector, group)
         currentLensFacing = lensFacing
     }
 
@@ -1395,7 +1514,11 @@ class MainActivity : ComponentActivity() {
 
         try {
             val bitmap = imageProxy.toBitmap()
-            val orientedBitmap = bitmap.orientForLandmarker(imageProxy.imageInfo.rotationDegrees, lensFacing)
+            val crop = imageProxy.cropRect
+            val croppedBitmap = Bitmap.createBitmap(bitmap, crop.left, crop.top, crop.width(), crop.height())
+            val orientedBitmap = croppedBitmap.orientForLandmarker(imageProxy.imageInfo.rotationDegrees, lensFacing)
+            if (croppedBitmap !== orientedBitmap) croppedBitmap.recycle()
+            if (bitmap !== croppedBitmap && bitmap !== orientedBitmap) bitmap.recycle()
             val mpImage = BitmapImageBuilder(orientedBitmap).build()
             val tracker = checkNotNull(handLandmarker)
             tracker.detectAsync(mpImage, SystemClock.uptimeMillis())

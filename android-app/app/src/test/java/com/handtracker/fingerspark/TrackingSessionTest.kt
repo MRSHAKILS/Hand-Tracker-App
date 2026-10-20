@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class TrackingSessionTest {
+    @Test fun captureTokensExistOnlyWhilePlayIsActive() {
+        val gate = TrackingSession()
+        assertNull(gate.currentSession())
+        val session = gate.start()
+        assertEquals(session, gate.currentSession())
+        gate.stop()
+        assertNull(gate.currentSession())
+    }
+
     @Test fun onlyOneFrameCanBeInFlight() {
         val gate = TrackingSession()
         val session = gate.start()

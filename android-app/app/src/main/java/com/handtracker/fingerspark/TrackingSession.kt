@@ -18,6 +18,8 @@ internal class TrackingSession {
 
     @Synchronized fun isCurrent(session: Long): Boolean = active && generation == session
 
+    @Synchronized fun currentSession(): Long? = if (active) generation else null
+
     @Synchronized fun beginFrame(session: Long): Boolean {
         if (!isCurrent(session) || inFlight != null) return false
         inFlight = session

@@ -11,7 +11,7 @@ The repository also contains the original browser prototype. The Android applica
 | Hand tracking | One hand, index fingertip cursor, finger-extension state, estimated hand size |
 | Paint | Persistent in-session strokes, nine colors, dwell-based color selection, clear gesture, adaptive brush size |
 | Game | Visible-area target placement, collision detection, session score, optional audio feedback |
-| Camera | Front/rear selection with CameraX preview and frame analysis |
+| Camera | Front/rear selection, fallback to an available lens, shared preview/analysis viewport |
 | Navigation | Name entry, personalized home, independent Paint/Game modes, tap-to-reveal toolbar, home and exit |
 | Languages | English and Bangla; preference stored locally |
 | Capture | Camera preview and overlay composed into a PNG |
@@ -27,7 +27,7 @@ flowchart LR
     Camera["Device camera"] --> Preview["CameraX PreviewView"]
     Camera --> Analysis["CameraX ImageAnalysis"]
     Analysis --> Gate["TrackingSession: validate session and admit one frame"]
-    Gate --> Orient["Bitmap orientation and front-camera mirroring"]
+    Gate --> Orient["Shared viewport crop, orientation, and mirroring"]
     Orient --> Model["MediaPipe Hand Landmarker: LIVE_STREAM"]
     Model --> Result["Landmarks and gesture state"]
     Result --> Valid["Reject results from inactive sessions"]
@@ -43,9 +43,10 @@ flowchart LR
 
 | Component | Responsibility |
 | --- | --- |
-| `MainActivity.kt` | Screen transitions, camera permission, CameraX binding, inference integration, localization, capture, sound |
+| `MainActivity.kt` | Screen transitions, permission recovery, CameraX binding, inference integration, localization, capture composition, sound |
 | `TrackingSession.kt` | Synchronized session generations and one-frame inference admission; prevents late work from affecting another session |
 | `PreviewGeometry.kt` | Center-crop coordinate conversion and target placement within the visible preview |
+| `CaptureOutputStream.kt` | Cancels capture writes when their play session ends |
 | `FingerOverlayView.kt` | Gesture interpretation, stroke bitmap, brush smoothing, palette dwell, target collisions, scoring |
 | `SparkStyle.kt` | Shared palette and interactive surfaces |
 | `SparkBackgroundView.kt` | Static home background |
@@ -77,9 +78,9 @@ stateDiagram-v2
 1. The launch animation completes or reaches its fallback timeout.
 2. First launch collects a name; subsequent launches show the personalized home screen.
 3. Choosing a mode requests camera permission if needed.
-4. CameraX binds preview and analysis to the activity lifecycle.
+4. After preview layout, CameraX binds preview and analysis to a shared viewport and the activity lifecycle. Model initialization runs on the analysis worker.
 5. Analysis keeps the latest frame. A session gate admits at most one asynchronous inference at a time.
-6. Frames are oriented for the camera sensor and mirrored for the front lens.
+6. Frames are cropped to the shared viewport, oriented for the camera sensor, and mirrored for the front lens.
 7. MediaPipe returns normalized landmarks. The index fingertip is landmark `8`.
 8. Finger-extension state compares fingertip and proximal-joint vertical coordinates. Hand size is estimated from wrist to middle-finger MCP distance.
 9. The overlay maps landmarks into the center-cropped preview and updates the selected mode.
@@ -102,7 +103,7 @@ The drawing is held in an in-memory bitmap. Entering a mode resets the session; 
 
 ### Game
 
-Move the fingertip cursor onto the target. A hit increments the score, relocates the target, and plays a tone when sound is enabled. A 450 ms cooldown prevents repeated capture of the same target. Score is session-local.
+Move the fingertip cursor onto the target. Hit distance is evaluated in screen pixels against the target ring plus a small touch tolerance; off-screen landmarks cannot score. A hit increments the score, relocates the target, and plays a tone when sound is enabled. A 450 ms cooldown prevents repeated capture of the same target. Score is session-local.
 
 ### Shared Controls
 
@@ -129,7 +130,7 @@ The circular language control is available on name entry and home. Mode names re
 | Android 10+ / API 29+ | Gallery-visible PNG through MediaStore at `Pictures/Finger Spark` |
 | Android 7-9 / API 24-28 | App-specific external Pictures directory; gallery visibility is not guaranteed |
 
-Failed MediaStore writes remove their pending entry. Capture omits the toolbar. Camera frames are not continuously recorded.
+Capture composition runs on the UI thread; PNG encoding and file writes run on a dedicated worker. Writes are cancelled when their play session ends, and failed MediaStore writes remove their pending entry. Unavailable legacy storage fails explicitly instead of using a relative path. Capture omits the toolbar. Camera frames are not continuously recorded.
 
 ## Repository Layout
 
@@ -229,8 +230,9 @@ Verification for this revision:
 | --- | --- |
 | Debug APK assembly | Passed |
 | Android lint | Passed with no errors; dependency-version and portrait-orientation warnings remain |
-| Local regression tests | 8 passed: session invalidation, in-flight frame ownership, center-crop mapping, and visible target placement |
+| Local regression tests | 17 passed: session invalidation, frame ownership, crop mapping, visible target placement, screen-space hits, and capture cancellation |
 | Packaged APK permissions | Inspected to verify camera access and the absence of internet permission |
+| Native 16 KB alignment | All bundled arm64-v8a/x86_64 load segments meet 16 KB alignment; APK ZIP alignment check passed |
 | Web JavaScript syntax | Passed using `npm test` |
 | Physical-device acceptance | Pending; no authorized device detected by ADB |
 
@@ -249,3 +251,4 @@ Additional constraints:
 - Release signing, store distribution, and release-device compatibility testing are not configured.
 
 See [design direction](android-app/docs/design-direction.md) for the UI brief and visual rules.
+See [release-readiness review](android-app/docs/release-review.md) for the audit brief, confirmed fixes, and remaining device checks.

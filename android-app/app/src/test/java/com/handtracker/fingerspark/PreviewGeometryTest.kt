@@ -36,4 +36,29 @@ class PreviewGeometryTest {
     fun rejectsZeroSizedImages() {
         PreviewGeometry(720f, 1480f, 0, 480)
     }
+
+    @Test fun missesOutsideVisibleRingDoNotScoreOnCroppedFrames() {
+        val geometry = PreviewGeometry(720f, 1480f, 640, 480)
+        assertFalse(geometry.isTargetHit(0.58f, 0.5f, 0.5f, 0.5f, 52f))
+        assertFalse(geometry.isTargetHit(0.5f, 0.58f, 0.5f, 0.5f, 52f))
+    }
+
+    @Test fun hitDistanceIsCircularInScreenPixels() {
+        val geometry = PreviewGeometry(720f, 1480f, 640, 480)
+        assertTrue(geometry.isTargetHit(0.5f + 40f / geometry.drawnWidth, 0.5f, 0.5f, 0.5f, 52f))
+        assertTrue(geometry.isTargetHit(0.5f, 0.5f + 40f / geometry.drawnHeight, 0.5f, 0.5f, 52f))
+        assertFalse(geometry.isTargetHit(0.5f + 40f / geometry.drawnWidth,
+            0.5f + 40f / geometry.drawnHeight, 0.5f, 0.5f, 52f))
+    }
+
+    @Test fun fingertipOutsideVisibleViewportCannotScore() {
+        val geometry = PreviewGeometry(720f, 1480f, 640, 480)
+        assertFalse(geometry.isTargetHit(0f, 0.5f, 0f, 0.5f, 52f))
+    }
+
+    @Test fun invalidTrackingCoordinatesCannotScore() {
+        val geometry = PreviewGeometry(720f, 1480f, 640, 480)
+        assertFalse(geometry.isTargetHit(Float.NaN, 0.5f, 0.5f, 0.5f, 52f))
+        assertFalse(geometry.isTargetHit(Float.POSITIVE_INFINITY, 0.5f, 0.5f, 0.5f, 52f))
+    }
 }
