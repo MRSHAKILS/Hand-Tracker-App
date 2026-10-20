@@ -1,6 +1,7 @@
 package com.handtracker.fingerspark
 
 import android.content.Context
+import android.annotation.SuppressLint
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -9,6 +10,8 @@ import android.util.AttributeSet
 import android.widget.ImageView
 import kotlin.math.min
 
+// The host uses a framework Material theme and ComponentActivity, not AppCompat inflation.
+@SuppressLint("AppCompatCustomView")
 class CircleImageView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null

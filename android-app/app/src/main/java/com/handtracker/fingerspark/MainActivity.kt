@@ -19,6 +19,8 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.text.InputFilter
+import android.view.inputmethod.InputMethodManager
 import android.provider.MediaStore
 import android.util.Log
 import android.util.TypedValue
@@ -46,6 +48,8 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.core.widget.TextViewCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.airbnb.lottie.FontAssetDelegate
 import com.airbnb.lottie.LottieAnimationView
 import com.airbnb.lottie.LottieDrawable
@@ -68,6 +72,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var overlayView: FingerOverlayView
     private lateinit var namePanel: View
     private lateinit var homePanel: View
+    private lateinit var homeArtwork: FrameLayout
+    private lateinit var nameArtwork: FrameLayout
     private lateinit var nameTitle: TextView
     private lateinit var nameMessage: TextView
     private lateinit var nameInput: EditText
@@ -95,7 +101,8 @@ class MainActivity : ComponentActivity() {
     private val hideControlsRunnable = Runnable { hideCameraControls() }
     private var currentLensFacing = CameraSelector.LENS_FACING_FRONT
     private var isCameraActive = false
-    private var isDetecting = false
+    private val trackingSession = TrackingSession()
+    private var capturePending = false
     private var splashFinished = false
     private var isSoundEnabled = true
     private var currentPlayMode = FingerOverlayView.PlayMode.PAINT
@@ -115,7 +122,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         analysisExecutor = Executors.newSingleThreadExecutor()
-        toneGenerator = ToneGenerator(AudioManager.STREAM_MUSIC, 70)
+        toneGenerator = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 70) }.getOrNull()
         language = savedLanguage()
         createLayout()
         overlayView.onSparkCaptured = ::playSparkSound
@@ -138,22 +145,46 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        controlsHandler.removeCallbacks(splashFallbackRunnable)
+        logoSplashView.pauseAnimation()
         if (!isFinishing && splashFinished) {
-            showHomeScreen()
+            showEntryScreen()
         }
+        handAnimationView.pauseAnimation()
+        galaxyCircleView.visibility = View.GONE
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (!splashFinished) {
+            logoSplashView.resumeAnimation()
+            controlsHandler.postDelayed(splashFallbackRunnable, SPLASH_FALLBACK_MS)
+        }
+        if (splashFinished && (homePanel.visibility == View.VISIBLE || namePanel.visibility == View.VISIBLE)) {
+            galaxyCircleView.visibility = View.VISIBLE
+            handAnimationView.resumeAnimation()
+        }
+    }
+
+    override fun onPause() {
+        if (isCameraActive) showEntryScreen()
+        super.onPause()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        controlsHandler.removeCallbacks(splashFallbackRunnable)
-        handLandmarker?.close()
+        controlsHandler.removeCallbacksAndMessages(null)
+        stopCameraSession()
+        handAnimationView.cancelAnimation()
+        logoSplashView.cancelAnimation()
         toneGenerator?.release()
+        analysisExecutor.execute { handLandmarker?.close() }
         analysisExecutor.shutdown()
     }
 
     private fun createLayout() {
         rootView = FrameLayout(this).apply {
-            setBackgroundColor(Color.rgb(23, 34, 47))
+            setBackgroundColor(SparkStyle.surface)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -170,11 +201,11 @@ class MainActivity : ComponentActivity() {
         galaxyCircleView = GalaxyCircleView(this).apply {
             visibility = View.GONE
             layoutParams = FrameLayout.LayoutParams(
-                dp(172),
-                dp(172)
+                dp(112),
+                dp(112)
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = dp(104)
+                topMargin = 0
             }
         }
 
@@ -185,11 +216,11 @@ class MainActivity : ComponentActivity() {
             repeatMode = LottieDrawable.RESTART
             scaleType = ImageView.ScaleType.FIT_CENTER
             layoutParams = FrameLayout.LayoutParams(
-                dp(196),
-                dp(196)
+                dp(132),
+                dp(132)
             ).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-                topMargin = dp(292)
+                topMargin = dp(88)
             }
         }
 
@@ -245,8 +276,6 @@ class MainActivity : ComponentActivity() {
         namePanel = createNamePanel()
         homePanel = createHomePanel()
         rootView.addView(sparkBackgroundView)
-        rootView.addView(galaxyCircleView)
-        rootView.addView(handAnimationView)
         rootView.addView(previewView)
         rootView.addView(overlayView)
         rootView.addView(controlTray)
@@ -254,6 +283,12 @@ class MainActivity : ComponentActivity() {
         rootView.addView(namePanel)
         rootView.addView(logoSplashView)
         setContentView(rootView)
+        ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, insets ->
+            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(rootView)
     }
 
     private fun createControlTray(): LinearLayout {
@@ -307,10 +342,12 @@ class MainActivity : ComponentActivity() {
             addView(soundButton)
             addView(exitButton)
             layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                marginStart = dp(12)
+                marginEnd = dp(12)
                 bottomMargin = dp(34)
             }
         }
@@ -325,15 +362,24 @@ class MainActivity : ComponentActivity() {
         return ImageButton(this).apply {
             contentDescription = description
             setImageResource(icon)
-            setBackgroundResource(background)
+            setColorFilter(SparkStyle.ink)
+            this.background = SparkStyle.touchSurface(
+                when (background) {
+                    R.drawable.round_button_coral -> SparkStyle.coral
+                    R.drawable.round_button_blue -> SparkStyle.mint
+                    else -> Color.WHITE
+                },
+                dp(26).toFloat()
+            )
+            androidx.core.view.ViewCompat.setTooltipText(this, description)
             scaleType = ImageView.ScaleType.CENTER
             setPadding(dp(14), dp(14), dp(14), dp(14))
             setOnClickListener {
                 onClick()
             }
-            layoutParams = LinearLayout.LayoutParams(dp(56), dp(56)).apply {
-                marginStart = dp(6)
-                marginEnd = dp(6)
+            layoutParams = LinearLayout.LayoutParams(0, dp(52), 1f).apply {
+                marginStart = dp(3)
+                marginEnd = dp(3)
             }
         }
     }
@@ -350,27 +396,30 @@ class MainActivity : ComponentActivity() {
             gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
-            setBackgroundResource(R.drawable.mode_card_surface)
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = SparkStyle.touchSurface(
+                if (accentBackground == R.drawable.round_button_mint) SparkStyle.mint else SparkStyle.coral,
+                dp(8).toFloat()
+            )
+            minimumHeight = dp(88)
+            setPadding(dp(20), dp(18), dp(20), dp(18))
             setOnClickListener { onClick() }
         }
 
         val iconShell = FrameLayout(this).apply {
-            setBackgroundResource(accentBackground)
-            layoutParams = LinearLayout.LayoutParams(dp(50), dp(50)).apply {
-                marginEnd = dp(12)
+            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+                marginEnd = dp(16)
             }
         }
 
         val iconView = ImageView(this).apply {
             setImageResource(icon)
-            setColorFilter(Color.rgb(23, 34, 47))
+            setColorFilter(SparkStyle.ink)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
 
         iconShell.addView(
             iconView,
-            FrameLayout.LayoutParams(dp(24), dp(24)).apply {
+            FrameLayout.LayoutParams(dp(32), dp(32)).apply {
                 gravity = Gravity.CENTER
             }
         )
@@ -382,17 +431,16 @@ class MainActivity : ComponentActivity() {
 
         val titleView = TextView(this).apply {
             this.text = title
-            setTextColor(Color.rgb(247, 241, 217))
-            textSize = 17f
+            setTextColor(SparkStyle.ink)
+            textSize = 22f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
         }
 
         val subtitleView = TextView(this).apply {
             this.text = subtitle
-            setTextColor(Color.rgb(189, 214, 220))
-            textSize = 12.5f
-            maxLines = 2
+            setTextColor(SparkStyle.ink)
+            textSize = 14f
         }
 
         textStack.addView(titleView)
@@ -414,7 +462,7 @@ class MainActivity : ComponentActivity() {
         card.addView(
             ImageView(this).apply {
                 setImageResource(android.R.drawable.ic_media_next)
-                setColorFilter(Color.rgb(189, 214, 220))
+                setColorFilter(SparkStyle.ink)
                 alpha = 0.8f
             },
             LinearLayout.LayoutParams(dp(18), dp(18))
@@ -436,7 +484,8 @@ class MainActivity : ComponentActivity() {
 
         val scrollPanel = ScrollView(this).apply {
             isFillViewport = true
-            clipToPadding = false
+            clipToPadding = true
+            setPadding(0, dp(88), 0, 0)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -446,7 +495,7 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(dp(28), dp(360), dp(28), dp(44))
+            setPadding(dp(24), 0, dp(24), dp(24))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -454,28 +503,26 @@ class MainActivity : ComponentActivity() {
         }
 
         homeTitle = TextView(this).apply {
-            setTextColor(Color.rgb(247, 241, 217))
-            textSize = 36f
+            setTextColor(SparkStyle.ink)
+            textSize = 30f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             maxLines = 2
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
                 26,
-                36,
+                30,
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
-            setShadowLayer(8f, 0f, 4f, Color.argb(140, 0, 0, 0))
         }
 
         homeMessage = TextView(this).apply {
-            setTextColor(Color.rgb(211, 227, 231))
+            setTextColor(SparkStyle.secondary)
             textSize = 16f
             gravity = Gravity.CENTER
             maxLines = 3
-            setPadding(0, dp(14), 0, dp(20))
-            setShadowLayer(3f, 0f, 2f, Color.argb(90, 0, 0, 0))
+            setPadding(0, dp(8), 0, dp(20))
         }
 
         paintModeCard = createModeCard(
@@ -499,7 +546,7 @@ class MainActivity : ComponentActivity() {
         homeLanguageButton = Button(this).apply {
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(247, 241, 217))
+            setTextColor(SparkStyle.ink)
             setBackgroundResource(R.drawable.button_language_circle)
             minWidth = 0
             minHeight = 0
@@ -509,6 +556,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        homeArtwork = createArtworkSlot()
+        panel.addView(homeArtwork)
         panel.addView(homeTitle)
         panel.addView(homeMessage)
         panel.addView(
@@ -518,8 +567,6 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 topMargin = dp(8)
-                marginStart = dp(10)
-                marginEnd = dp(10)
                 bottomMargin = dp(12)
             }
         )
@@ -529,8 +576,6 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginStart = dp(10)
-                marginEnd = dp(10)
                 bottomMargin = dp(16)
             }
         )
@@ -547,6 +592,7 @@ class MainActivity : ComponentActivity() {
 
         scrollPanel.addView(panel)
         container.addView(scrollPanel)
+        addBrandLabel(container)
         container.addView(
             homeLanguageButton,
             FrameLayout.LayoutParams(dp(54), dp(54)).apply {
@@ -563,7 +609,6 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(11), dp(12), dp(11))
-            setBackgroundResource(R.drawable.creator_panel_background)
         }
 
         val photoSlot = CircleImageView(this).apply {
@@ -578,16 +623,15 @@ class MainActivity : ComponentActivity() {
         }
 
         creatorName = TextView(this).apply {
-            setTextColor(Color.rgb(247, 241, 217))
+            setTextColor(SparkStyle.ink)
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
             maxLines = 1
         }
 
         creatorInfo = TextView(this).apply {
-            setTextColor(Color.rgb(189, 214, 220))
+            setTextColor(SparkStyle.secondary)
             textSize = 12f
-            maxLines = 2
         }
 
         textStack.addView(creatorName)
@@ -627,7 +671,8 @@ class MainActivity : ComponentActivity() {
 
         val scrollPanel = ScrollView(this).apply {
             isFillViewport = true
-            clipToPadding = false
+            clipToPadding = true
+            setPadding(0, dp(88), 0, 0)
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -637,7 +682,7 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(dp(28), dp(360), dp(28), dp(60))
+            setPadding(dp(24), 0, dp(24), dp(32))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -647,7 +692,7 @@ class MainActivity : ComponentActivity() {
         nameLanguageButton = Button(this).apply {
             textSize = 14f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(247, 241, 217))
+            setTextColor(SparkStyle.ink)
             setBackgroundResource(R.drawable.button_language_circle)
             minWidth = 0
             minHeight = 0
@@ -658,7 +703,7 @@ class MainActivity : ComponentActivity() {
         }
 
         nameTitle = TextView(this).apply {
-            setTextColor(Color.rgb(247, 241, 217))
+            setTextColor(SparkStyle.ink)
             textSize = 34f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
@@ -670,16 +715,14 @@ class MainActivity : ComponentActivity() {
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
-            setShadowLayer(8f, 0f, 4f, Color.argb(140, 0, 0, 0))
         }
 
         nameMessage = TextView(this).apply {
-            setTextColor(Color.rgb(211, 227, 231))
+            setTextColor(SparkStyle.secondary)
             textSize = 16f
             gravity = Gravity.CENTER
             maxLines = 3
             setPadding(0, dp(14), 0, dp(18))
-            setShadowLayer(3f, 0f, 2f, Color.argb(90, 0, 0, 0))
         }
 
         nameInput = EditText(this).apply {
@@ -690,6 +733,11 @@ class MainActivity : ComponentActivity() {
             setBackgroundResource(R.drawable.input_name)
             minHeight = dp(56)
             maxLines = 1
+            filters = arrayOf(InputFilter.LengthFilter(64))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
+            }
         }
 
         nameSaveButton = Button(this).apply {
@@ -708,10 +756,14 @@ class MainActivity : ComponentActivity() {
                 }
 
                 saveUserName(name)
+                (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .hideSoftInputFromWindow(nameInput.windowToken, 0)
                 showHomeScreen()
             }
         }
 
+        nameArtwork = createArtworkSlot()
+        panel.addView(nameArtwork)
         panel.addView(nameTitle)
         panel.addView(nameMessage)
         panel.addView(
@@ -738,6 +790,7 @@ class MainActivity : ComponentActivity() {
 
         scrollPanel.addView(panel)
         container.addView(scrollPanel)
+        addBrandLabel(container)
         container.addView(
             nameLanguageButton,
             FrameLayout.LayoutParams(dp(54), dp(54)).apply {
@@ -747,6 +800,39 @@ class MainActivity : ComponentActivity() {
             }
         )
         return container
+    }
+
+    private fun createArtworkSlot(): FrameLayout = FrameLayout(this).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(220)
+        )
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+    }
+
+    private fun attachArtwork(slot: FrameLayout) {
+        (galaxyCircleView.parent as? ViewGroup)?.removeView(galaxyCircleView)
+        (handAnimationView.parent as? ViewGroup)?.removeView(handAnimationView)
+        slot.addView(galaxyCircleView)
+        slot.addView(handAnimationView)
+    }
+
+    private fun addBrandLabel(container: FrameLayout) {
+        container.addView(TextView(this).apply {
+            setText(R.string.app_name)
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(SparkStyle.ink)
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(SparkStyle.surface)
+        }, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            topMargin = dp(24)
+            marginStart = dp(24)
+            marginEnd = dp(88)
+        })
     }
 
     private fun hasCameraPermission(): Boolean {
@@ -817,6 +903,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showHomeScreen() {
         stopCameraSession()
+        attachArtwork(homeArtwork)
         logoSplashView.visibility = View.GONE
         sparkBackgroundView.visibility = View.VISIBLE
         galaxyCircleView.visibility = View.VISIBLE
@@ -834,6 +921,7 @@ class MainActivity : ComponentActivity() {
 
     private fun showNameScreen() {
         stopCameraSession()
+        attachArtwork(nameArtwork)
         logoSplashView.visibility = View.GONE
         sparkBackgroundView.visibility = View.VISIBLE
         galaxyCircleView.visibility = View.VISIBLE
@@ -902,7 +990,7 @@ class MainActivity : ComponentActivity() {
 
     private fun stopCameraSession() {
         isCameraActive = false
-        isDetecting = false
+        trackingSession.stop()
         overlayView.clearFingertip()
         cameraProvider?.unbindAll()
     }
@@ -913,15 +1001,28 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun captureScreen() {
+        if (!isCameraActive || capturePending) return
+        capturePending = true
         hideCameraControls(immediate = true)
-        rootView.postDelayed(
+        controlsHandler.postDelayed(
             {
                 try {
-                    saveScreenshot(buildScreenshot())
-                    Toast.makeText(this, copy().captureSaved, Toast.LENGTH_SHORT).show()
+                    if (isCameraActive && !isFinishing) {
+                        val screenshot = buildScreenshot()
+                        try {
+                            saveScreenshot(screenshot)
+                        } finally {
+                            screenshot.recycle()
+                        }
+                        val message = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) copy().captureSaved
+                            else copy().captureSavedLegacy
+                        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                    }
                 } catch (error: Exception) {
                     Log.e(TAG, "Could not save screenshot", error)
                     Toast.makeText(this, copy().captureFailed, Toast.LENGTH_SHORT).show()
+                } finally {
+                    capturePending = false
                 }
             },
             CAPTURE_DELAY_MS
@@ -929,22 +1030,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun buildScreenshot(): Bitmap {
-        val screenshot = Bitmap.createBitmap(rootView.width, rootView.height, Bitmap.Config.ARGB_8888)
+        val previewBitmap = previewView.bitmap ?: throw IllegalStateException("Camera preview is not ready")
+        val screenshot = Bitmap.createBitmap(previewView.width, previewView.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(screenshot)
-        previewView.bitmap?.let { previewBitmap ->
+        try {
             val srcWidth = previewBitmap.width.toFloat()
             val srcHeight = previewBitmap.height.toFloat()
-            val scale = maxOf(rootView.width / srcWidth, rootView.height / srcHeight)
+            val scale = maxOf(previewView.width / srcWidth, previewView.height / srcHeight)
             val drawnWidth = srcWidth * scale
             val drawnHeight = srcHeight * scale
-            val left = (rootView.width - drawnWidth) / 2f
-            val top = (rootView.height - drawnHeight) / 2f
+            val left = (previewView.width - drawnWidth) / 2f
+            val top = (previewView.height - drawnHeight) / 2f
             val matrix = Matrix().apply {
                 postScale(scale, scale)
                 postTranslate(left, top)
             }
             canvas.drawBitmap(previewBitmap, matrix, null)
-        } ?: rootView.draw(canvas)
+        } finally {
+            previewBitmap.recycle()
+        }
         overlayView.draw(canvas)
         return screenshot
     }
@@ -963,20 +1067,24 @@ class MainActivity : ComponentActivity() {
             val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                 ?: throw IllegalStateException("Could not create image entry")
 
-            resolver.openOutputStream(uri)?.use { output ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
-            } ?: throw IllegalStateException("Could not open image output stream")
-
-            values.clear()
-            values.put(MediaStore.Images.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
+            try {
+                resolver.openOutputStream(uri)?.use { output ->
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                } ?: throw IllegalStateException("Could not open image output stream")
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (error: Exception) {
+                resolver.delete(uri, null, null)
+                throw error
+            }
             return
         }
 
         val directory = File(getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Finger Spark")
         directory.mkdirs()
         FileOutputStream(File(directory, filename)).use { output ->
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
         }
     }
 
@@ -1024,14 +1132,17 @@ class MainActivity : ComponentActivity() {
     private fun updateLanguageText() {
         val text = copy()
         val userName = savedUserName()
+        overlayView.scoreLabel = if (language == Language.ENGLISH) "Spark" else "স্পার্ক"
 
         nameLanguageButton.text = text.languageButton
+        nameLanguageButton.contentDescription = if (language == Language.ENGLISH) "Switch to Bangla" else "Switch to English"
         nameTitle.text = text.nameTitle
         nameMessage.text = text.nameMessage
         nameInput.hint = text.nameHint
         nameSaveButton.text = text.saveName
 
         homeLanguageButton.text = text.languageButton
+        homeLanguageButton.contentDescription = nameLanguageButton.contentDescription
         homeTitle.text = userName?.let { text.homeGreeting.format(it) } ?: text.appName
         homeMessage.text = text.homeMessage
         updateModeCardText(paintModeCard, text.paintMode, text.paintModeInfo)
@@ -1044,6 +1155,9 @@ class MainActivity : ComponentActivity() {
         captureButton.contentDescription = text.captureScreen
         exitButton.contentDescription = text.exitApp
         updateSoundButton(text)
+        listOf(backHomeButton, switchCameraButton, captureButton, exitButton, soundButton).forEach {
+            ViewCompat.setTooltipText(it, it.contentDescription)
+        }
     }
 
     private fun toggleSound() {
@@ -1063,6 +1177,7 @@ class MainActivity : ComponentActivity() {
             if (isSoundEnabled) R.drawable.ic_sound_on else R.drawable.ic_sound_off
         )
         soundButton.contentDescription = if (isSoundEnabled) text.soundOn else text.soundOff
+        ViewCompat.setTooltipText(soundButton, soundButton.contentDescription)
     }
 
     private fun updateModeCardText(card: LinearLayout, title: String, subtitle: String) {
@@ -1102,6 +1217,7 @@ class MainActivity : ComponentActivity() {
                 soundOn = "Sound on",
                 soundOff = "Sound off",
                 captureSaved = "Saved to Pictures/Finger Spark",
+                captureSavedLegacy = "Saved to the app's Pictures folder",
                 captureFailed = "Could not save screenshot",
                 backHome = "Back to home",
                 exitApp = "Exit app"
@@ -1128,6 +1244,7 @@ class MainActivity : ComponentActivity() {
                 soundOn = "সাউন্ড চালু",
                 soundOff = "সাউন্ড বন্ধ",
                 captureSaved = "Pictures/Finger Spark-এ সেভ হয়েছে",
+                captureSavedLegacy = "অ্যাপের Pictures ফোল্ডারে সেভ হয়েছে",
                 captureFailed = "ছবি সেভ করা যায়নি",
                 backHome = "হোমে ফিরে যাও",
                 exitApp = "অ্যাপ বন্ধ করো"
@@ -1136,14 +1253,19 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startCamera() {
-        setupHandLandmarker()
-
+        val session = trackingSession.start()
+        isCameraActive = true
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
         cameraProviderFuture.addListener(
             {
-                cameraProvider = cameraProviderFuture.get()
-                bindCamera(currentLensFacing)
-                isCameraActive = true
+                if (!trackingSession.isCurrent(session) || isFinishing || isDestroyed) return@addListener
+                try {
+                    setupHandLandmarker()
+                    cameraProvider = cameraProviderFuture.get()
+                    bindCamera(currentLensFacing, session)
+                } catch (error: Exception) {
+                    cameraFailed(error)
+                }
             },
             ContextCompat.getMainExecutor(this)
         )
@@ -1156,18 +1278,30 @@ class MainActivity : ComponentActivity() {
             CameraSelector.LENS_FACING_FRONT
         }
 
-        bindCamera(nextLensFacing)
+        try {
+            val selector = CameraSelector.Builder().requireLensFacing(nextLensFacing).build()
+            if (cameraProvider?.hasCamera(selector) == true) {
+                bindCamera(nextLensFacing, trackingSession.start())
+            }
+        } catch (error: Exception) {
+            cameraFailed(error)
+        }
     }
 
-    private fun bindCamera(lensFacing: Int) {
+    private fun cameraFailed(error: Exception) {
+        Log.e(TAG, "Could not start camera tracking", error)
+        showEntryScreen()
+        Toast.makeText(this, if (language == Language.ENGLISH) "Camera unavailable. Please try again."
+            else "ক্যামেরা চালু করা যায়নি। আবার চেষ্টা করো।", Toast.LENGTH_LONG).show()
+    }
+
+    private fun bindCamera(lensFacing: Int, session: Long) {
         val provider = cameraProvider ?: return
         val selector = CameraSelector.Builder()
             .requireLensFacing(lensFacing)
             .build()
 
-        if (!provider.hasCamera(selector)) {
-            return
-        }
+        check(provider.hasCamera(selector)) { "Requested camera is unavailable" }
 
         val preview = Preview.Builder().build().also {
             it.setSurfaceProvider(previewView.surfaceProvider)
@@ -1177,10 +1311,9 @@ class MainActivity : ComponentActivity() {
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()
             .also {
-                it.setAnalyzer(analysisExecutor, ::analyzeFrame)
+                it.setAnalyzer(analysisExecutor) { frame -> analyzeFrame(frame, session, lensFacing) }
             }
 
-        isDetecting = false
         overlayView.clearFingertip()
         provider.unbindAll()
         provider.bindToLifecycle(this, selector, preview, analysis)
@@ -1203,18 +1336,21 @@ class MainActivity : ComponentActivity() {
             .setMinHandPresenceConfidence(0.6f)
             .setMinTrackingConfidence(0.65f)
             .setResultListener { result, image ->
-                isDetecting = false
+                val session = trackingSession.completeFrame() ?: return@setResultListener
                 val landmarks = result.landmarks().firstOrNull()
                 val fingertip = landmarks?.getOrNull(INDEX_FINGER_TIP)
+                val imageWidth = image.width
+                val imageHeight = image.height
                 runOnUiThread {
+                    if (!trackingSession.isCurrent(session)) return@runOnUiThread
                     if (landmarks == null || fingertip == null) {
                         overlayView.clearFingertip()
                     } else {
                         overlayView.setHandState(
                             fingertip.x(),
                             fingertip.y(),
-                            image.width,
-                            image.height,
+                            imageWidth,
+                            imageHeight,
                             isFingerExtended(landmarks, INDEX_FINGER_TIP, INDEX_FINGER_PIP),
                             isFingerExtended(landmarks, MIDDLE_FINGER_TIP, MIDDLE_FINGER_PIP),
                             isFingerExtended(landmarks, RING_FINGER_TIP, RING_FINGER_PIP),
@@ -1225,7 +1361,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             .setErrorListener { error ->
-                isDetecting = false
+                trackingSession.completeFrame()
                 Log.e(TAG, "Hand tracking error", error)
             }
             .build()
@@ -1251,38 +1387,30 @@ class MainActivity : ComponentActivity() {
         return kotlin.math.sqrt(dx * dx + dy * dy)
     }
 
-    private fun analyzeFrame(imageProxy: ImageProxy) {
-        if (isDetecting) {
+    private fun analyzeFrame(imageProxy: ImageProxy, session: Long, lensFacing: Int) {
+        if (!trackingSession.beginFrame(session)) {
             imageProxy.close()
             return
         }
 
         try {
             val bitmap = imageProxy.toBitmap()
-            val orientedBitmap = bitmap.orientForLandmarker(imageProxy.imageInfo.rotationDegrees)
+            val orientedBitmap = bitmap.orientForLandmarker(imageProxy.imageInfo.rotationDegrees, lensFacing)
             val mpImage = BitmapImageBuilder(orientedBitmap).build()
-            isDetecting = true
-            handLandmarker?.detectAsync(mpImage, SystemClock.uptimeMillis())
+            val tracker = checkNotNull(handLandmarker)
+            tracker.detectAsync(mpImage, SystemClock.uptimeMillis())
         } catch (error: Exception) {
-            isDetecting = false
+            trackingSession.completeFrame()
             Log.e(TAG, "Could not analyze camera frame", error)
         } finally {
             imageProxy.close()
         }
     }
 
-    private fun ImageProxy.toBitmap(): Bitmap {
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val buffer = planes[0].buffer
-        buffer.rewind()
-        bitmap.copyPixelsFromBuffer(buffer)
-        return bitmap
-    }
-
-    private fun Bitmap.orientForLandmarker(rotationDegrees: Int): Bitmap {
+    private fun Bitmap.orientForLandmarker(rotationDegrees: Int, lensFacing: Int): Bitmap {
         val matrix = Matrix().apply {
             postRotate(rotationDegrees.toFloat())
-            if (currentLensFacing == CameraSelector.LENS_FACING_FRONT) {
+            if (lensFacing == CameraSelector.LENS_FACING_FRONT) {
                 postScale(-1f, 1f)
             }
         }
@@ -1337,6 +1465,7 @@ private data class UiCopy(
     val soundOn: String,
     val soundOff: String,
     val captureSaved: String,
+    val captureSavedLegacy: String,
     val captureFailed: String,
     val backHome: String,
     val exitApp: String

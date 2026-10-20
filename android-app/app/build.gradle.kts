@@ -40,4 +40,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("com.airbnb.android:lottie:6.6.7")
     implementation("com.google.mediapipe:tasks-vision:0.10.35")
+    testImplementation("junit:junit:4.13.2")
 }

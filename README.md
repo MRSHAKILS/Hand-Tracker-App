@@ -1,207 +1,251 @@
-<div align="center">
-  <img src="android-app/docs/images/readme-poster.png" alt="Finger Spark - playful offline hand tracking on Android" width="100%" />
+# Finger Spark
 
-  # Finger Spark
+Native Android hand tracking with two interaction modes: fingertip painting and target collection. Camera frames are processed on the device using MediaPipe Hand Landmarker. The Android application works offline after installation.
 
-  **A camera becomes a canvas. A fingertip becomes the controller.**
+The repository also contains the original browser prototype. The Android application is a separate Kotlin project; it does not embed the web app.
 
-  Native, offline hand tracking for playful learning on Android.
+## Capabilities
 
-  `Kotlin` · `CameraX` · `MediaPipe` · `Lottie` · `Android 7.0+`
-</div>
-
-## About The Project
-
-Finger Spark is an offline Android experience that lets children interact with the world through hand movement. The app uses the phone camera to follow the tip of the index finger in real time, then turns that movement into two simple activities: painting in the air and catching glowing targets.
-
-The project began with a child's question: *What do you do with the knowledge you gain from Computer Science?* Finger Spark is one answer - technology used to encourage curiosity, movement, and creative play.
-
-## Experiences
-
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="android-app/docs/images/paint-mode.jpg" alt="Paint mode drawing with an index finger" width="240" />
-      <h3>Paint</h3>
-      <p>Draw glowing strokes by moving one raised index finger. Hold the fingertip over a palette color to select it, or hold four fingers up to clear the canvas.</p>
-    </td>
-    <td width="50%" align="center">
-      <img src="android-app/docs/images/game-mode.jpg" alt="Game mode catching spark targets" width="240" />
-      <h3>Game</h3>
-      <p>Guide the glowing fingertip cursor into each spark target. Every successful catch increases the score, moves the target, and can play sound feedback.</p>
-    </td>
-  </tr>
-</table>
-
-## Features
-
-- Real-time index-fingertip tracking with MediaPipe Hand Landmarker
-- Separate Paint and Game experiences with no overlapping mode UI
-- Front and rear camera switching
-- Bangla and English interface
-- Personalized welcome using the child's locally saved name
-- Gallery capture to `Pictures/Finger Spark`
-- Optional sound feedback
-- Tap-to-reveal camera controls for a clean play area
-- Home and exit controls at the bottom of the camera screen
-- Offline operation with no account, cloud service, analytics, or internet permission
-- Camera and analysis shutdown whenever the user leaves active play
-
-## How To Play
-
-1. Open Finger Spark and let the launch animation finish.
-2. Enter the child's name the first time the app is opened.
-3. Choose `EN` or `BN` from the circular language control.
-4. Allow camera access when Android asks for permission.
-5. Choose **Paint** or **Game** from the home screen.
-6. Keep the hand visible and point one index finger toward the camera.
-7. Tap anywhere on the camera screen to reveal the bottom controls.
-
-### Paint Controls
-
-- **Draw:** raise the index finger and fold the other fingers.
-- **Change color:** hover the fingertip over a palette swatch for about half a second.
-- **Clear canvas:** raise the index, middle, ring, and little fingers and hold briefly.
-- **Save artwork:** reveal the controls and tap the capture icon.
-
-### Game Controls
-
-- Move the index fingertip cursor onto the glowing target.
-- Each captured target adds one spark to the score and appears in a new position.
-- Use the sound control to enable or mute feedback.
-- Use the camera-switch control when another viewpoint works better.
+| Area | Implementation |
+| --- | --- |
+| Hand tracking | One hand, index fingertip cursor, finger-extension state, estimated hand size |
+| Paint | Persistent in-session strokes, nine colors, dwell-based color selection, clear gesture, adaptive brush size |
+| Game | Visible-area target placement, collision detection, session score, optional audio feedback |
+| Camera | Front/rear selection with CameraX preview and frame analysis |
+| Navigation | Name entry, personalized home, independent Paint/Game modes, tap-to-reveal toolbar, home and exit |
+| Languages | English and Bangla; preference stored locally |
+| Capture | Camera preview and overlay composed into a PNG |
+| Design | Flat native Views UI, mint/coral mode surfaces, scrollable content, system-inset handling |
+| Lifecycle | Session invalidation on exit or backgrounding; stale frames and camera-start callbacks are rejected |
 
 ## Architecture
 
-Finger Spark is a single-activity native Android application. Its components are intentionally small and local so the complete interaction loop can run without a network connection.
+The Android app uses a single `ComponentActivity` with custom Android Views. UI, camera orchestration, and storage are coordinated by `MainActivity`; inference admission and coordinate conversion have separate, testable classes.
 
 ```mermaid
 flowchart LR
-    Camera["CameraX camera"] --> Analysis["ImageAnalysis worker"]
-    Analysis --> MediaPipe["MediaPipe Hand Landmarker"]
-    MediaPipe --> Landmarks["Hand landmarks and finger state"]
-    Landmarks --> Overlay["FingerOverlayView"]
-    Overlay --> Paint["Paint canvas and palette"]
-    Overlay --> Game["Targets, score, and sound"]
-    Preview["CameraX PreviewView"] --> Screen["Composited play screen"]
-    Paint --> Screen
-    Game --> Screen
-    Screen --> Capture["MediaStore gallery capture"]
+    Camera["Device camera"] --> Preview["CameraX PreviewView"]
+    Camera --> Analysis["CameraX ImageAnalysis"]
+    Analysis --> Gate["TrackingSession: validate session and admit one frame"]
+    Gate --> Orient["Bitmap orientation and front-camera mirroring"]
+    Orient --> Model["MediaPipe Hand Landmarker: LIVE_STREAM"]
+    Model --> Result["Landmarks and gesture state"]
+    Result --> Valid["Reject results from inactive sessions"]
+    Valid --> Overlay["FingerOverlayView"]
+    Overlay --> Paint["Paint bitmap, palette, brush"]
+    Overlay --> Game["Target, score, audio callback"]
+    Preview --> Capture["Preview and overlay composition"]
+    Overlay --> Capture
+    Capture --> Storage["MediaStore or app-specific Pictures"]
 ```
 
-### Component Responsibilities
+### Components
 
-| Layer | Component | Responsibility |
-| --- | --- | --- |
-| App shell | `MainActivity` | Screen state, permissions, localization, camera lifecycle, capture, sound, and navigation |
-| Camera | CameraX `Preview` + `ImageAnalysis` | Lifecycle-aware camera preview and continuous frame delivery |
-| Vision | MediaPipe `HandLandmarker` | On-device hand landmark inference using the bundled `.task` model |
-| Interaction | `FingerOverlayView` | Coordinate mapping, gestures, fingertip cursor, painting, palette, targets, and score |
-| Home motion | `SparkBackgroundView`, `GalaxyCircleView`, Lottie | Branded splash, welcome, and home-screen motion |
-| Local data | `SharedPreferences` | Stores only the chosen name and language on the device |
-| Media output | Android `MediaStore` | Saves composed screenshots to the phone gallery |
+| Component | Responsibility |
+| --- | --- |
+| `MainActivity.kt` | Screen transitions, camera permission, CameraX binding, inference integration, localization, capture, sound |
+| `TrackingSession.kt` | Synchronized session generations and one-frame inference admission; prevents late work from affecting another session |
+| `PreviewGeometry.kt` | Center-crop coordinate conversion and target placement within the visible preview |
+| `FingerOverlayView.kt` | Gesture interpretation, stroke bitmap, brush smoothing, palette dwell, target collisions, scoring |
+| `SparkStyle.kt` | Shared palette and interactive surfaces |
+| `SparkBackgroundView.kt` | Static home background |
+| `GalaxyCircleView.kt` | Home orbit animation |
+| `CircleImageView.kt` | Circular creator-photo clipping |
+| Bundled assets | Hand landmark model and Lottie animation files |
 
-## Runtime Workflow
+This is a small single-module application. It does not currently use a repository/data layer, dependency-injection framework, navigation library, or persistent database.
+
+## Application Workflow
 
 ```mermaid
-sequenceDiagram
-    participant User
-    participant CameraX
-    participant Analyzer
-    participant MediaPipe
-    participant Overlay
-
-    User->>CameraX: Opens Paint or Game
-    CameraX->>Analyzer: Supplies the latest camera frame
-    Analyzer->>MediaPipe: Rotates frame and runs live-stream detection
-    MediaPipe-->>Analyzer: Returns normalized hand landmarks
-    Analyzer->>Overlay: Sends fingertip, finger states, and hand size
-    Overlay-->>User: Renders cursor, drawing, or game response
-    User->>Overlay: Leaves play or exits
-    Overlay->>CameraX: Camera and analysis are stopped
+stateDiagram-v2
+    [*] --> Splash
+    Splash --> NameEntry: No saved name
+    Splash --> Home: Name available
+    NameEntry --> Home: Valid name submitted
+    Home --> Permission: Camera access required
+    Permission --> Home: Denied
+    Permission --> Paint: Granted for Paint
+    Permission --> Game: Granted for Game
+    Home --> Paint: Permission already granted
+    Home --> Game: Permission already granted
+    Paint --> Home: Home, back, or foreground loss
+    Game --> Home: Home, back, or foreground loss
+    Home --> [*]: Exit or system back
 ```
 
-## Offline And Privacy Design
+1. The launch animation completes or reaches its fallback timeout.
+2. First launch collects a name; subsequent launches show the personalized home screen.
+3. Choosing a mode requests camera permission if needed.
+4. CameraX binds preview and analysis to the activity lifecycle.
+5. Analysis keeps the latest frame. A session gate admits at most one asynchronous inference at a time.
+6. Frames are oriented for the camera sensor and mirrored for the front lens.
+7. MediaPipe returns normalized landmarks. The index fingertip is landmark `8`.
+8. Finger-extension state compares fingertip and proximal-joint vertical coordinates. Hand size is estimated from wrist to middle-finger MCP distance.
+9. The overlay maps landmarks into the center-cropped preview and updates the selected mode.
+10. Camera shutdown invalidates the session. Delayed startup and inference callbacks cannot reactivate it.
 
-- The manifest requests only `android.permission.CAMERA`.
-- The MediaPipe model and Lottie animations are packaged inside the APK.
-- Camera frames are analyzed on the device and are not uploaded.
-- The child's name and language preference stay in local app storage.
-- There are no background services. Returning home, switching away from the app, or exiting unbinds the camera.
-- The exit action removes the app task so the camera cannot continue running in the background.
+## Interaction Reference
 
-## Project Structure
+### Paint
+
+| Action | Gesture or control |
+| --- | --- |
+| Draw | Index finger raised, middle finger folded |
+| Move without drawing | Fold the index finger or raise the middle finger |
+| Select a color | Hold the fingertip over a swatch for 450 ms |
+| Clear | Hold index, middle, ring, and little fingers extended for 600 ms |
+| Change brush size | Move the hand toward or away from the camera |
+| Save | Tap the screen, then select capture |
+
+The drawing is held in an in-memory bitmap. Entering a mode resets the session; drawings are not restored after app termination. Use capture to retain a result.
+
+### Game
+
+Move the fingertip cursor onto the target. A hit increments the score, relocates the target, and plays a tone when sound is enabled. A 450 ms cooldown prevents repeated capture of the same target. Score is session-local.
+
+### Shared Controls
+
+Tap the camera screen to show the bottom toolbar. It contains home, camera switch, capture, sound, and exit actions, and hides after approximately 2.6 seconds.
+
+The circular language control is available on name entry and home. Mode names remain Paint and Game in both languages.
+
+## Offline Behavior And Data Handling
+
+- Camera is the only user-facing permission. Manifest merge rules explicitly remove internet and network-state permissions contributed by dependencies; no microphone or broad storage access is requested.
+- Inference runs locally using `hand_landmarker.task` from the APK.
+- Animations are bundled; no runtime asset download is required.
+- Name and language are stored in private `SharedPreferences`.
+- Automatic application backup is disabled.
+- No account, analytics client, backend, or upload path is implemented.
+- Camera sessions stop when play loses the foreground. Home animations pause when the activity stops.
+- No foreground service, background service, or scheduled worker is implemented.
+- Exit stops the camera and removes the activity task. Android controls process retention; an idle cached process is not a running camera session.
+
+### Capture Storage
+
+| Android version | Destination |
+| --- | --- |
+| Android 10+ / API 29+ | Gallery-visible PNG through MediaStore at `Pictures/Finger Spark` |
+| Android 7-9 / API 24-28 | App-specific external Pictures directory; gallery visibility is not guaranteed |
+
+Failed MediaStore writes remove their pending entry. Capture omits the toolbar. Camera frames are not continuously recorded.
+
+## Repository Layout
 
 ```text
-android-app/
-├── app/src/main/
-│   ├── assets/                  # MediaPipe model and Lottie files
-│   ├── java/.../fingerspark/
-│   │   ├── MainActivity.kt      # App, camera, permissions, and navigation
-│   │   ├── FingerOverlayView.kt # Paint and Game interaction engine
-│   │   ├── SparkBackgroundView.kt
-│   │   ├── GalaxyCircleView.kt
-│   │   └── CircleImageView.kt
-│   └── res/                     # Icons, surfaces, colors, and creator image
-├── docs/images/                 # README poster and mode previews
-├── build.gradle.kts
-└── README.md
+.
+|-- README.md
+|-- android-app/
+|   |-- app/
+|   |   |-- build.gradle.kts
+|   |   `-- src/
+|   |       |-- main/
+|   |       |   |-- AndroidManifest.xml
+|   |       |   |-- assets/
+|   |       |   |-- java/com/handtracker/fingerspark/
+|   |       |   `-- res/
+|   |       `-- test/java/com/handtracker/fingerspark/
+|   |-- docs/design-direction.md
+|   |-- gradle/wrapper/
+|   |-- gradlew.bat
+|   `-- build.gradle.kts
+|-- index.html
+|-- app.js
+|-- styles.css
+|-- server.mjs
+|-- package.json
+`-- package-lock.json
 ```
 
-## Build Requirements
+## Android Build
 
-- Android Studio with Android SDK 35
+### Requirements
+
 - JDK 17
-- An Android device or emulator running Android 7.0 / API 24 or newer
-- A physical Android phone is strongly recommended for camera and hand-tracking tests
+- Android SDK platform 35 and compatible build tools
+- Android 7.0 / API 24 or newer for installation
+- Internet access for the initial Gradle dependency download
+- A physical camera-equipped device for meaningful hand-tracking validation
 
-Dependencies are downloaded during the first Gradle build. After that, the app itself operates fully offline.
+The project uses Gradle Wrapper 8.10.2, Android Gradle Plugin 8.7.3, and Kotlin 2.0.21. The wrapper can use the project-local toolchain when present; otherwise configure `JAVA_HOME` and `ANDROID_HOME`, or select the installed SDK in Android Studio.
 
-## Build The APK
+### Build And Check
 
-From PowerShell:
+From the repository root in PowerShell:
 
 ```powershell
 cd android-app
-.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :app:assembleDebug :app:lintDebug :app:testDebugUnitTest
 ```
 
-The APK is created at:
+The debug APK is generated at:
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+android-app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Install On A Phone
+A debug APK is intended for development and manual testing. A production release requires a release signing configuration.
 
-1. Enable **Developer options** and **USB debugging** on the Android phone.
-2. Connect the phone by USB and approve the computer when Android asks.
-3. Confirm the device is available with `adb devices`.
-4. Install the debug build:
+### Install
+
+Enable Developer options and USB debugging on the device, connect it, and approve the computer's authorization request.
 
 ```powershell
+adb devices
 .\gradlew.bat :app:installDebug
 ```
 
-The current build has been installed successfully on a Samsung Galaxy S9 (`SM-G960F`).
+If `adb` is not on PATH, use `<Android SDK>/platform-tools/adb.exe`. The install command assumes the current directory is `android-app`.
 
-## Technology
+## Browser Prototype
 
-| Technology | Use |
+The root web application uses JavaScript, the MediaPipe Hands package, and a local Node HTTP server.
+
+```powershell
+npm ci
+npm test
+npm run dev
+```
+
+Open `http://127.0.0.1:3000` and approve camera permission. Browser camera access requires localhost or a secure HTTPS origin. The web prototype has its own behavior and is not a feature-identical Android build.
+
+## Dependencies
+
+| Dependency | Version | Purpose |
+| --- | --- | --- |
+| CameraX | 1.5.3 | Preview, lens selection, analysis, lifecycle binding |
+| MediaPipe Tasks Vision | 0.10.35 | On-device hand landmark inference |
+| Lottie Android | 6.6.7 | Bundled splash and hand animations |
+| AndroidX Activity KTX | 1.9.3 | Activity and permission APIs |
+| AndroidX Core KTX | 1.15.0 | Compatibility helpers |
+| JUnit | 4.13.2 | Local regression tests |
+
+## Validation And Limitations
+
+Verification for this revision:
+
+| Check | Result |
 | --- | --- |
-| Kotlin | Native Android application logic |
-| CameraX 1.5.3 | Preview, lens selection, lifecycle, and frame analysis |
-| MediaPipe Tasks Vision 0.10.35 | Real-time on-device hand landmark detection |
-| Lottie 6.6.7 | Launch and home-screen animation |
-| Android Canvas | Drawing, cursor, palette, targets, and score rendering |
-| MediaStore | Gallery-compatible screenshot saving |
+| Debug APK assembly | Passed |
+| Android lint | Passed with no errors; dependency-version and portrait-orientation warnings remain |
+| Local regression tests | 8 passed: session invalidation, in-flight frame ownership, center-crop mapping, and visible target placement |
+| Packaged APK permissions | Inspected to verify camera access and the absence of internet permission |
+| Web JavaScript syntax | Passed using `npm test` |
+| Physical-device acceptance | Pending; no authorized device detected by ADB |
 
-## Creator
+The web `npm test` command checks syntax; it does not exercise browser camera behavior.
 
-Created by **Shakil** - an engineer from NSU exploring how computer vision can turn children's curiosity into playful, hands-on experiences.
+Physical-device acceptance still requires checking permission denial and retry, both cameras, Paint gestures and palette selection, Game scoring, gallery capture, background/foreground transitions, text scaling, and system insets. The current revision has not been revalidated on a connected phone.
 
----
+Additional constraints:
 
-<div align="center">
-  Built for curious hands and growing minds.
-</div>
+- One hand is tracked at a time.
+- The activity is designed for portrait phones. Tablet, foldable, and landscape layouts have not been certified.
+- Finger-state heuristics assume an upright hand; unusual rotations and occlusion can misclassify gestures.
+- Lighting, camera quality, motion blur, and device performance affect tracking.
+- Sound state, score, and drawings are not persisted.
+- Android 7-9 captures use app-specific storage.
+- Release signing, store distribution, and release-device compatibility testing are not configured.
+
+See [design direction](android-app/docs/design-direction.md) for the UI brief and visual rules.

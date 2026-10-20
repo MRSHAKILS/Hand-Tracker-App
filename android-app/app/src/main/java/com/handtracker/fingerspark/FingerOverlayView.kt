@@ -84,6 +84,7 @@ class FingerOverlayView @JvmOverloads constructor(
     private var fingertipY: Float? = null
     private var sourceWidth = 1
     private var sourceHeight = 1
+    private var previewGeometry: PreviewGeometry? = null
     private var targetX = 0.68f
     private var targetY = 0.34f
     private var score = 0
@@ -102,6 +103,11 @@ class FingerOverlayView @JvmOverloads constructor(
     private var clearProgress = 0f
     private var playMode = PlayMode.PAINT
     var onSparkCaptured: (() -> Unit)? = null
+    var scoreLabel: String = "Spark"
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -126,8 +132,13 @@ class FingerOverlayView @JvmOverloads constructor(
     ) {
         fingertipX = x
         fingertipY = y
+        val sourceChanged = sourceWidth != imageWidth || sourceHeight != imageHeight
         sourceWidth = max(imageWidth, 1)
         sourceHeight = max(imageHeight, 1)
+        if (sourceChanged) {
+            liftPen()
+            if (playMode == PlayMode.GAME) moveTarget()
+        }
         updateBrush(handSize)
 
         val mapped = mapPoint(x, y) ?: run {
@@ -218,6 +229,7 @@ class FingerOverlayView @JvmOverloads constructor(
         paintBitmap = newBitmap
         paintCanvas = newCanvas
         oldBitmap?.recycle()
+        if (playMode == PlayMode.GAME) moveTarget()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -227,11 +239,12 @@ class FingerOverlayView @JvmOverloads constructor(
             paintBitmap?.let { canvas.drawBitmap(it, 0f, 0f, null) }
         }
 
-        val scale = max(width / sourceWidth.toFloat(), height / sourceHeight.toFloat())
-        val drawnWidth = sourceWidth * scale
-        val drawnHeight = sourceHeight * scale
-        val offsetX = (width - drawnWidth) / 2f
-        val offsetY = (height - drawnHeight) / 2f
+        if (width <= 0 || height <= 0) return
+        val geometry = geometry() ?: return
+        val drawnWidth = geometry.drawnWidth
+        val drawnHeight = geometry.drawnHeight
+        val offsetX = geometry.offsetX
+        val offsetY = geometry.offsetY
 
         if (playMode == PlayMode.PAINT) {
             drawPalette(canvas)
@@ -297,11 +310,15 @@ class FingerOverlayView @JvmOverloads constructor(
         val distance = hypot(point.x - previous.x, point.y - previous.y)
         val steps = max(1, ceil(distance / 2f).toInt())
 
+        var lastX = previous.x
+        var lastY = previous.y
         for (step in 1..steps) {
             val t = step / steps.toFloat()
             val x = previous.x + (point.x - previous.x) * t
             val y = previous.y + (point.y - previous.y) * t
-            distanceLeft += hypot(x - previous.x, y - previous.y)
+            distanceLeft += hypot(x - lastX, y - lastY)
+            lastX = x
+            lastY = y
             if (distanceLeft >= brushSpacing) {
                 canvas.drawCircle(x, y, brushRadius, dotPaint)
                 distanceLeft = 0f
@@ -449,7 +466,7 @@ class FingerOverlayView @JvmOverloads constructor(
     }
 
     private fun drawScore(canvas: Canvas) {
-        canvas.drawText("Spark $score", 28f, 68f, scorePaint)
+        canvas.drawText("$scoreLabel $score", 28f, 68f, scorePaint)
     }
 
     private fun drawTarget(
@@ -483,20 +500,28 @@ class FingerOverlayView @JvmOverloads constructor(
     }
 
     private fun moveTarget() {
-        targetX = 0.18f + random.nextFloat() * 0.64f
-        targetY = 0.18f + random.nextFloat() * 0.52f
+        if (width <= 0 || height <= 0) return
+        val geometry = geometry() ?: return
+        targetX = geometry.targetX(random.nextFloat())
+        targetY = geometry.targetY(random.nextFloat())
     }
 
     private fun mapPoint(x: Float, y: Float): PointF? {
         if (width <= 0 || height <= 0) {
             return null
         }
-        val scale = max(width / sourceWidth.toFloat(), height / sourceHeight.toFloat())
-        val drawnWidth = sourceWidth * scale
-        val drawnHeight = sourceHeight * scale
-        val offsetX = (width - drawnWidth) / 2f
-        val offsetY = (height - drawnHeight) / 2f
-        return PointF(offsetX + x * drawnWidth, offsetY + y * drawnHeight)
+        val geometry = geometry() ?: return null
+        return PointF(geometry.screenX(x), geometry.screenY(y))
+    }
+
+    private fun geometry(): PreviewGeometry? {
+        if (width <= 0 || height <= 0) return null
+        val current = previewGeometry
+        if (current == null || current.viewWidth != width.toFloat() || current.viewHeight != height.toFloat()
+            || current.sourceWidth != sourceWidth || current.sourceHeight != sourceHeight) {
+            previewGeometry = PreviewGeometry(width.toFloat(), height.toFloat(), sourceWidth, sourceHeight)
+        }
+        return previewGeometry
     }
 
     private enum class CursorMode {
