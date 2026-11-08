@@ -3,7 +3,6 @@
     <style name="BaseAppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
-        <item name="android:windowFullscreen">true</item>
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">#217356</item>
         <item name="android:navigationBarColor">#1C2426</item>

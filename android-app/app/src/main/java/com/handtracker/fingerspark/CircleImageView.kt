@@ -3,7 +3,6 @@ package com.handtracker.fingerspark
 import android.content.Context
 import android.annotation.SuppressLint
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
@@ -18,9 +17,9 @@ class CircleImageView @JvmOverloads constructor(
 ) : ImageView(context, attrs) {
     private val clipPath = Path()
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(255, 248, 216)
+        color = SparkStyle.rule
         style = Paint.Style.STROKE
-        strokeWidth = 4f
+        strokeWidth = resources.displayMetrics.density
     }
 
     override fun onDraw(canvas: Canvas) {

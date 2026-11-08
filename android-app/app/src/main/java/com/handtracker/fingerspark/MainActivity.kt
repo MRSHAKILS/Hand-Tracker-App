@@ -3,6 +3,7 @@ package com.handtracker.fingerspark
 import android.Manifest
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
+import android.animation.ValueAnimator
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -21,10 +22,12 @@ import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.text.InputFilter
 import android.text.TextUtils
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.EditorInfo
 import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
@@ -33,6 +36,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -56,6 +60,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.widget.TextViewCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.doOnLayout
 import com.airbnb.lottie.FontAssetDelegate
 import com.airbnb.lottie.LottieAnimationView
@@ -81,6 +87,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var homePanel: View
     private lateinit var homeArtwork: FrameLayout
     private lateinit var nameArtwork: FrameLayout
+    private lateinit var homeContent: LinearLayout
+    private lateinit var nameContent: LinearLayout
+    private lateinit var modeChoices: LinearLayout
+    private var homeLayoutSpec: HomeLayoutSpec? = null
     private lateinit var nameTitle: TextView
     private lateinit var nameMessage: TextView
     private lateinit var nameInput: EditText
@@ -88,8 +98,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var nameLanguageButton: Button
     private lateinit var homeTitle: TextView
     private lateinit var homeMessage: TextView
-    private lateinit var paintModeCard: LinearLayout
-    private lateinit var gameModeCard: LinearLayout
+    private lateinit var paintModeCard: ModeTileView
+    private lateinit var gameModeCard: ModeTileView
     private lateinit var homeLanguageButton: Button
     private lateinit var creatorName: TextView
     private lateinit var creatorInfo: TextView
@@ -132,6 +142,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         analysisExecutor = Executors.newSingleThreadExecutor()
         captureExecutor = Executors.newSingleThreadExecutor()
@@ -178,12 +189,14 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         if (!splashFinished) {
-            logoSplashView.resumeAnimation()
-            controlsHandler.postDelayed(splashFallbackRunnable, SPLASH_FALLBACK_MS)
+            if (isMotionEnabled()) {
+                logoSplashView.resumeAnimation()
+                controlsHandler.postDelayed(splashFallbackRunnable, SPLASH_FALLBACK_MS)
+            } else finishSplashScreen()
         }
         if (splashFinished && (homePanel.visibility == View.VISIBLE || namePanel.visibility == View.VISIBLE)) {
             galaxyCircleView.visibility = View.VISIBLE
-            handAnimationView.resumeAnimation()
+            playHomeMotion()
         }
     }
 
@@ -306,12 +319,19 @@ class MainActivity : ComponentActivity() {
         rootView.addView(namePanel)
         rootView.addView(logoSplashView)
         setContentView(rootView)
+        WindowCompat.getInsetsController(window, rootView).apply {
+            hide(WindowInsetsCompat.Type.statusBars())
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
         ViewCompat.setOnApplyWindowInsetsListener(rootView) { view, insets ->
             val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            val keyboard = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            view.setPadding(safe.left, safe.top, safe.right, maxOf(safe.bottom, keyboard))
+            view.post { updateResponsiveLayout() }
             insets
         }
         ViewCompat.requestApplyInsets(rootView)
+        rootView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> updateResponsiveLayout() }
     }
 
     private fun createControlTray(): LinearLayout {
@@ -369,9 +389,9 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                marginStart = dp(12)
-                marginEnd = dp(12)
-                bottomMargin = dp(34)
+                marginStart = dp(16)
+                marginEnd = dp(16)
+                bottomMargin = dp(16)
             }
         }
     }
@@ -385,17 +405,18 @@ class MainActivity : ComponentActivity() {
         return ImageButton(this).apply {
             contentDescription = description
             setImageResource(icon)
-            setColorFilter(SparkStyle.ink)
+            setColorFilter(if (background == R.drawable.round_button_blue) SparkStyle.ink
+                else if (background == R.drawable.round_button_coral) SparkStyle.coral else Color.WHITE)
             this.background = SparkStyle.touchSurface(
                 when (background) {
-                    R.drawable.round_button_coral -> SparkStyle.coral
                     R.drawable.round_button_blue -> SparkStyle.mint
-                    else -> Color.WHITE
+                    else -> Color.TRANSPARENT
                 },
-                dp(26).toFloat()
+                dp(8).toFloat(),
+                lightRipple = background != R.drawable.round_button_blue
             )
             androidx.core.view.ViewCompat.setTooltipText(this, description)
-            scaleType = ImageView.ScaleType.CENTER
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(14), dp(14), dp(14), dp(14))
             setOnClickListener {
                 onClick()
@@ -410,88 +431,11 @@ class MainActivity : ComponentActivity() {
     private fun createModeCard(
         title: String,
         subtitle: String,
-        icon: Int,
-        accentBackground: Int,
+        isPaint: Boolean,
         onClick: () -> Unit
-    ): LinearLayout {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            isClickable = true
-            isFocusable = true
-            background = SparkStyle.touchSurface(
-                if (accentBackground == R.drawable.round_button_mint) SparkStyle.mint else SparkStyle.coral,
-                dp(8).toFloat()
-            )
-            minimumHeight = dp(88)
-            setPadding(dp(20), dp(18), dp(20), dp(18))
-            setOnClickListener { onClick() }
-        }
-
-        val iconShell = FrameLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
-                marginEnd = dp(16)
-            }
-        }
-
-        val iconView = ImageView(this).apply {
-            setImageResource(icon)
-            setColorFilter(SparkStyle.ink)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-        }
-
-        iconShell.addView(
-            iconView,
-            FrameLayout.LayoutParams(dp(32), dp(32)).apply {
-                gravity = Gravity.CENTER
-            }
-        )
-
-        val textStack = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val titleView = TextView(this).apply {
-            this.text = title
-            setTextColor(SparkStyle.ink)
-            textSize = 22f
-            typeface = Typeface.DEFAULT_BOLD
-            maxLines = 1
-        }
-
-        val subtitleView = TextView(this).apply {
-            this.text = subtitle
-            setTextColor(SparkStyle.ink)
-            textSize = 14f
-        }
-
-        textStack.addView(titleView)
-        textStack.addView(
-            subtitleView,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dp(2)
-            }
-        )
-
-        card.addView(iconShell)
-        card.addView(
-            textStack,
-            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        )
-        card.addView(
-            ImageView(this).apply {
-                setImageResource(android.R.drawable.ic_media_next)
-                setColorFilter(SparkStyle.ink)
-                alpha = 0.8f
-            },
-            LinearLayout.LayoutParams(dp(18), dp(18))
-        )
-
-        return card
+    ): ModeTileView = ModeTileView(this, isPaint).apply {
+        bindText(title, subtitle)
+        setOnClickListener { onClick() }
     }
 
     private fun createHomePanel(): View {
@@ -524,18 +468,19 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
+        homeContent = panel
 
         homeTitle = TextView(this).apply {
             setTextColor(SparkStyle.ink)
-            textSize = 30f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
+            textSize = 28f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            gravity = Gravity.START
             maxLines = 2
             ellipsize = TextUtils.TruncateAt.END
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
-                26,
-                30,
+                24,
+                28,
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
@@ -543,25 +488,22 @@ class MainActivity : ComponentActivity() {
 
         homeMessage = TextView(this).apply {
             setTextColor(SparkStyle.secondary)
-            textSize = 16f
-            gravity = Gravity.CENTER
-            maxLines = 3
-            setPadding(0, dp(8), 0, dp(20))
+            textSize = 15f
+            gravity = Gravity.START
+            setPadding(0, dp(6), 0, dp(20))
         }
 
         paintModeCard = createModeCard(
             title = text.paintMode,
             subtitle = text.paintModeInfo,
-            icon = R.drawable.ic_paint_mode,
-            accentBackground = R.drawable.round_button_mint,
+            isPaint = true,
             onClick = { startMode(FingerOverlayView.PlayMode.PAINT) }
         )
 
         gameModeCard = createModeCard(
             title = text.gameMode,
             subtitle = text.gameModeInfo,
-            icon = R.drawable.ic_game_mode,
-            accentBackground = R.drawable.round_button_coral,
+            isPaint = false,
             onClick = { startMode(FingerOverlayView.PlayMode.GAME) }
         )
 
@@ -575,6 +517,9 @@ class MainActivity : ComponentActivity() {
             minWidth = 0
             minHeight = 0
             includeFontPadding = false
+            isAllCaps = false
+            letterSpacing = 0f
+            setPadding(0, 0, 0, 0)
             setOnClickListener {
                 toggleLanguage()
             }
@@ -582,27 +527,25 @@ class MainActivity : ComponentActivity() {
 
         homeArtwork = createArtworkSlot()
         panel.addView(homeArtwork)
-        panel.addView(homeTitle)
+        panel.addView(homeTitle, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply { topMargin = dp(12) })
         panel.addView(homeMessage)
-        panel.addView(
-            paintModeCard,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                topMargin = dp(8)
-                bottomMargin = dp(12)
-            }
-        )
-        panel.addView(
-            gameModeCard,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dp(16)
-            }
-        )
+        modeChoices = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+            isBaselineAligned = false
+            addView(paintModeCard, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            addView(gameModeCard, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                marginStart = dp(12)
+            })
+        }
+        panel.addView(modeChoices, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ))
+        panel.addView(View(this).apply { setBackgroundColor(SparkStyle.rule) }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(1)
+        ).apply { topMargin = dp(24); bottomMargin = dp(10) })
         panel.addView(
             creatorPanel,
             LinearLayout.LayoutParams(
@@ -621,8 +564,8 @@ class MainActivity : ComponentActivity() {
             homeLanguageButton,
             FrameLayout.LayoutParams(dp(54), dp(54)).apply {
                 gravity = Gravity.TOP or Gravity.END
-                topMargin = dp(24)
-                marginEnd = dp(22)
+                topMargin = dp(16)
+                marginEnd = dp(24)
             }
         )
         return container
@@ -632,11 +575,12 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(11), dp(12), dp(11))
+            setPadding(0, dp(8), 0, dp(8))
         }
 
         val photoSlot = CircleImageView(this).apply {
             contentDescription = "Creator photo"
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             setImageResource(R.drawable.creator_photo)
             scaleType = ImageView.ScaleType.CENTER_CROP
         }
@@ -648,9 +592,8 @@ class MainActivity : ComponentActivity() {
 
         creatorName = TextView(this).apply {
             setTextColor(SparkStyle.ink)
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            maxLines = 1
+            textSize = 13f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         }
 
         creatorInfo = TextView(this).apply {
@@ -671,7 +614,7 @@ class MainActivity : ComponentActivity() {
 
         panel.addView(
             photoSlot,
-            LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+            LinearLayout.LayoutParams(dp(42), dp(42)).apply {
                 marginEnd = dp(12)
             }
         )
@@ -706,12 +649,13 @@ class MainActivity : ComponentActivity() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            setPadding(dp(24), 0, dp(24), dp(32))
+            setPadding(dp(24), 0, dp(24), dp(24))
             layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
+        nameContent = panel
 
         nameLanguageButton = Button(this).apply {
             textSize = 14f
@@ -721,6 +665,9 @@ class MainActivity : ComponentActivity() {
             minWidth = 0
             minHeight = 0
             includeFontPadding = false
+            isAllCaps = false
+            letterSpacing = 0f
+            setPadding(0, 0, 0, 0)
             setOnClickListener {
                 toggleLanguage()
             }
@@ -728,14 +675,14 @@ class MainActivity : ComponentActivity() {
 
         nameTitle = TextView(this).apply {
             setTextColor(SparkStyle.ink)
-            textSize = 34f
-            typeface = Typeface.DEFAULT_BOLD
-            gravity = Gravity.CENTER
+            textSize = 28f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            gravity = Gravity.START
             maxLines = 2
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this,
                 24,
-                34,
+                28,
                 2,
                 TypedValue.COMPLEX_UNIT_SP
             )
@@ -743,14 +690,13 @@ class MainActivity : ComponentActivity() {
 
         nameMessage = TextView(this).apply {
             setTextColor(SparkStyle.secondary)
-            textSize = 16f
-            gravity = Gravity.CENTER
-            maxLines = 3
-            setPadding(0, dp(14), 0, dp(18))
+            textSize = 15f
+            gravity = Gravity.START
+            setPadding(0, dp(8), 0, dp(24))
         }
 
         nameInput = EditText(this).apply {
-            textSize = 20f
+            textSize = 18f
             setSingleLine(true)
             setTextColor(Color.rgb(11, 18, 29))
             setHintTextColor(Color.rgb(110, 122, 137))
@@ -759,31 +705,28 @@ class MainActivity : ComponentActivity() {
             maxLines = 1
             filters = arrayOf(InputFilter.LengthFilter(64))
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            imeOptions = EditorInfo.IME_ACTION_DONE
+            setOnEditorActionListener { _, action, _ ->
+                if (action == EditorInfo.IME_ACTION_DONE) {
+                    submitName()
+                    true
+                } else false
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
             }
         }
 
         nameSaveButton = Button(this).apply {
-            textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.rgb(23, 34, 47))
+            textSize = 17f
+            isAllCaps = false
+            letterSpacing = 0f
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            setTextColor(Color.WHITE)
             setBackgroundResource(R.drawable.button_primary)
             minHeight = dp(56)
-            minWidth = dp(210)
-            setOnClickListener {
-                val name = nameInput.text.toString().trim()
-
-                if (name.isBlank()) {
-                    Toast.makeText(this@MainActivity, copy().nameNeeded, Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-
-                saveUserName(name)
-                (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
-                    .hideSoftInputFromWindow(nameInput.windowToken, 0)
-                showHomeScreen()
-            }
+            minWidth = 0
+            setOnClickListener { submitName() }
         }
 
         nameArtwork = createArtworkSlot()
@@ -796,8 +739,6 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
-                marginStart = dp(12)
-                marginEnd = dp(12)
                 bottomMargin = dp(18)
             }
         )
@@ -806,10 +747,7 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                marginStart = dp(12)
-                marginEnd = dp(12)
-            }
+            )
         )
 
         scrollPanel.addView(panel)
@@ -819,8 +757,8 @@ class MainActivity : ComponentActivity() {
             nameLanguageButton,
             FrameLayout.LayoutParams(dp(54), dp(54)).apply {
                 gravity = Gravity.TOP or Gravity.END
-                topMargin = dp(24)
-                marginEnd = dp(22)
+                topMargin = dp(16)
+                marginEnd = dp(24)
             }
         )
         return container
@@ -829,7 +767,7 @@ class MainActivity : ComponentActivity() {
     private fun createArtworkSlot(): FrameLayout = FrameLayout(this).apply {
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(220)
+            dp(176)
         )
         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
@@ -842,10 +780,16 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun addBrandLabel(container: FrameLayout) {
-        container.addView(TextView(this).apply {
+        val wordmark = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        wordmark.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_game_mode)
+            setColorFilter(SparkStyle.paintAccent)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(26), dp(26)).apply { marginEnd = dp(8) })
+        wordmark.addView(TextView(this).apply {
             setText(R.string.app_name)
             textSize = 20f
-            typeface = Typeface.DEFAULT_BOLD
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(SparkStyle.ink)
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
@@ -853,15 +797,86 @@ class MainActivity : ComponentActivity() {
             TextViewCompat.setAutoSizeTextTypeUniformWithConfiguration(
                 this, 12, 20, 1, TypedValue.COMPLEX_UNIT_SP
             )
-            setBackgroundColor(SparkStyle.surface)
-        }, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, dp(54)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        container.addView(wordmark, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(54)
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            topMargin = dp(24)
+            topMargin = dp(16)
             marginStart = dp(24)
             marginEnd = dp(88)
         })
+    }
+
+    private fun submitName() {
+        val name = nameInput.text.toString().trim()
+        if (name.isBlank()) {
+            nameInput.error = copy().nameNeeded
+            nameInput.requestFocus()
+            return
+        }
+        nameInput.error = null
+        saveUserName(name)
+        (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
+            .hideSoftInputFromWindow(nameInput.windowToken, 0)
+        nameInput.clearFocus()
+        showHomeScreen()
+    }
+
+    private fun updateResponsiveLayout() {
+        val density = resources.displayMetrics.density
+        val width = ((rootView.width - rootView.paddingLeft - rootView.paddingRight) / density).toInt()
+        val height = ((rootView.height - rootView.paddingTop - rootView.paddingBottom) / density).toInt()
+        if (width <= 0 || height <= 0) return
+        val spec = HomeLayoutPolicy.forWindow(width, height, resources.configuration.fontScale)
+        if (spec == homeLayoutSpec) return
+        homeLayoutSpec = spec
+        homeContent.setPadding(dp(spec.sidePadding), 0, dp(spec.sidePadding), dp(20))
+        nameContent.setPadding(dp(spec.sidePadding), 0, dp(spec.sidePadding), dp(24))
+        listOf(homeArtwork, nameArtwork).forEach {
+            it.layoutParams = (it.layoutParams as LinearLayout.LayoutParams).apply { this.height = dp(spec.artworkHeight) }
+        }
+        val compactArtwork = spec.artworkHeight < 160
+        val ringSize = if (compactArtwork) 80 else 96
+        val handSize = if (compactArtwork) 96 else 112
+        galaxyCircleView.layoutParams = FrameLayout.LayoutParams(dp(ringSize), dp(ringSize)).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+        }
+        handAnimationView.layoutParams = FrameLayout.LayoutParams(dp(handSize), dp(handSize)).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            topMargin = dp(spec.artworkHeight - handSize)
+        }
+        modeChoices.orientation = if (spec.stackModes) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        listOf(paintModeCard, gameModeCard).forEachIndexed { index, card ->
+            card.setCompact(spec.stackModes)
+            card.layoutParams = if (spec.stackModes) {
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    topMargin = if (index == 1) dp(12) else 0
+                }
+            } else {
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                    marginStart = if (index == 1) dp(12) else 0
+                }
+            }
+        }
+        controlTray.layoutParams = (controlTray.layoutParams as FrameLayout.LayoutParams).apply {
+            this.width = dp(spec.toolbarWidth)
+        }
+    }
+
+    private fun playHomeMotion() {
+        val enabled = isMotionEnabled()
+        galaxyCircleView.motionEnabled = enabled
+        if (enabled) handAnimationView.playAnimation() else {
+            handAnimationView.pauseAnimation()
+            handAnimationView.progress = 0.4f
+        }
+    }
+
+    private fun isMotionEnabled(): Boolean {
+        val animationsEnabled = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ValueAnimator.areAnimatorsEnabled()
+        val batterySaver = (getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
+        return animationsEnabled && !batterySaver
     }
 
     private fun hasCameraPermission(): Boolean {
@@ -923,8 +938,10 @@ class MainActivity : ComponentActivity() {
                 }
             }
         )
-        logoSplashView.playAnimation()
-        controlsHandler.postDelayed(splashFallbackRunnable, SPLASH_FALLBACK_MS)
+        if (isMotionEnabled()) {
+            logoSplashView.playAnimation()
+            controlsHandler.postDelayed(splashFallbackRunnable, SPLASH_FALLBACK_MS)
+        } else finishSplashScreen()
     }
 
     private fun finishSplashScreen() {
@@ -956,7 +973,7 @@ class MainActivity : ComponentActivity() {
         sparkBackgroundView.visibility = View.VISIBLE
         galaxyCircleView.visibility = View.VISIBLE
         handAnimationView.visibility = View.VISIBLE
-        handAnimationView.playAnimation()
+        playHomeMotion()
         previewView.visibility = View.GONE
         overlayView.visibility = View.GONE
         namePanel.visibility = View.GONE
@@ -974,7 +991,7 @@ class MainActivity : ComponentActivity() {
         sparkBackgroundView.visibility = View.VISIBLE
         galaxyCircleView.visibility = View.VISIBLE
         handAnimationView.visibility = View.VISIBLE
-        handAnimationView.playAnimation()
+        playHomeMotion()
         previewView.visibility = View.GONE
         overlayView.visibility = View.GONE
         updateLanguageText()
@@ -1014,7 +1031,14 @@ class MainActivity : ComponentActivity() {
             .translationY(0f)
             .setDuration(160L)
             .start()
-        controlsHandler.postDelayed(hideControlsRunnable, CONTROLS_VISIBLE_MS)
+        val accessibility = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        if (!accessibility.isTouchExplorationEnabled) {
+            val timeout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                accessibility.getRecommendedTimeoutMillis(CONTROLS_VISIBLE_MS.toInt(),
+                    AccessibilityManager.FLAG_CONTENT_CONTROLS or AccessibilityManager.FLAG_CONTENT_ICONS).toLong()
+            } else CONTROLS_VISIBLE_MS
+            controlsHandler.postDelayed(hideControlsRunnable, maxOf(CONTROLS_VISIBLE_MS, timeout))
+        }
     }
 
     private fun hideCameraControls(immediate: Boolean = false) {
@@ -1223,10 +1247,12 @@ class MainActivity : ComponentActivity() {
         overlayView.scoreLabel = if (language == Language.ENGLISH) "Spark" else "স্পার্ক"
 
         nameLanguageButton.text = text.languageButton
-        nameLanguageButton.contentDescription = if (language == Language.ENGLISH) "Switch to Bangla" else "Switch to English"
+        nameLanguageButton.contentDescription = if (language == Language.ENGLISH) "Switch to Bangla" else "ইংরেজিতে পরিবর্তন করো"
         nameTitle.text = text.nameTitle
         nameMessage.text = text.nameMessage
         nameInput.hint = text.nameHint
+        nameInput.contentDescription = text.nameHint
+        if (nameInput.error != null) nameInput.error = text.nameNeeded
         nameSaveButton.text = text.saveName
 
         homeLanguageButton.text = text.languageButton
@@ -1268,10 +1294,8 @@ class MainActivity : ComponentActivity() {
         ViewCompat.setTooltipText(soundButton, soundButton.contentDescription)
     }
 
-    private fun updateModeCardText(card: LinearLayout, title: String, subtitle: String) {
-        val textStack = card.getChildAt(1) as? LinearLayout ?: return
-        (textStack.getChildAt(0) as? TextView)?.text = title
-        (textStack.getChildAt(1) as? TextView)?.text = subtitle
+    private fun updateModeCardText(card: ModeTileView, title: String, subtitle: String) {
+        card.bindText(title, subtitle)
     }
 
     private fun playSparkSound() {
@@ -1287,19 +1311,19 @@ class MainActivity : ComponentActivity() {
             Language.ENGLISH -> UiCopy(
                 languageButton = "Bn",
                 appName = "Finger Spark",
-                nameTitle = "What is your name?",
-                nameMessage = "Type your name to start your Finger Spark adventure.",
+                nameTitle = "What should we call you?",
+                nameMessage = "Let's start with a hello.",
                 nameHint = "Your name",
                 saveName = "Let's play",
                 nameNeeded = "Please enter a name",
                 homeGreeting = "Hi, %s!",
-                homeMessage = "Pick a mode and play with your hand.",
+                homeMessage = "What shall we make today?",
                 paintMode = "Paint",
-                paintModeInfo = "Draw with your fingertip.",
+                paintModeInfo = "Air canvas",
                 gameMode = "Game",
-                gameModeInfo = "Catch the glowing sparks.",
+                gameModeInfo = "Spark chase",
                 creatorName = "Built by Shakil",
-                creatorInfo = "Engineer from NSU, building playful tech for curious kids.",
+                creatorInfo = "Engineer, NSU",
                 switchCamera = "Switch camera",
                 captureScreen = "Capture screen",
                 soundOn = "Sound on",
@@ -1315,16 +1339,16 @@ class MainActivity : ComponentActivity() {
                 languageButton = "En",
                 appName = "ফিঙ্গার স্পার্ক",
                 nameTitle = "তোমার নাম কী?",
-                nameMessage = "ফিঙ্গার স্পার্ক শুরু করতে তোমার নাম লিখো।",
+                nameMessage = "আগে একটু পরিচয় হোক।",
                 nameHint = "তোমার নাম",
                 saveName = "চলো খেলি",
                 nameNeeded = "দয়া করে নাম লিখো",
                 homeGreeting = "হাই, %s!",
-                homeMessage = "একটা mode বেছে নাও, তারপর খেলো।",
+                homeMessage = "আজ কী বানাবে?",
                 paintMode = "Paint",
-                paintModeInfo = "আঙুল দিয়ে আঁকো।",
+                paintModeInfo = "আকাশে আঁকা",
                 gameMode = "Game",
-                gameModeInfo = "উজ্জ্বল spark ধরো।",
+                gameModeInfo = "স্পার্কের খেলা",
                 creatorName = "শাকিলের তৈরি",
                 creatorInfo = "NSUer ইঞ্জিনিয়ার, তোমার জন্য বানিয়েছি ।",
                 switchCamera = "ক্যামেরা বদলাও",

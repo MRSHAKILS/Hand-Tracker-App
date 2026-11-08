@@ -6,9 +6,9 @@ The repository also contains the original browser prototype. The Android applica
 
 ## Download Android APK
 
-**[Download Finger Spark v1.0.0 - signed APK](https://github.com/MRSHAKILS/Hand-Tracker-App/releases/download/v1.0.0/Finger-Spark-v1.0.0.apk)**
+**[Download Finger Spark v1.1.0 - signed APK](https://github.com/MRSHAKILS/Hand-Tracker-App/releases/download/v1.1.0/Finger-Spark-v1.1.0.apk)**
 
-[Release notes and SHA-256 checksum](https://github.com/MRSHAKILS/Hand-Tracker-App/releases/tag/v1.0.0)
+[Release notes and SHA-256 checksum](https://github.com/MRSHAKILS/Hand-Tracker-App/releases/tag/v1.1.0)
 
 Requires Android 7.0 / API 24 or newer and a camera. This is a preview release: automated checks pass, but physical-device acceptance is still pending. The installed app runs offline.
 
@@ -16,7 +16,7 @@ Requires Android 7.0 / API 24 or newer and a camera. This is a preview release: 
 2. Open it and allow installation from the browser or file manager if prompted.
 3. Install Finger Spark, then grant camera permission when choosing a mode.
 
-An earlier debug APK must be uninstalled first because its signing certificate differs from this release. Uninstalling clears the saved name/language and Android 7-9 app-specific captures. Android 10+ gallery captures are stored separately.
+The signed v1.0.0 release can be updated in place. An earlier debug APK must be uninstalled first because its signing certificate differs from this release. Uninstalling clears the saved name/language and Android 7-9 app-specific captures. Android 10+ gallery captures are stored separately.
 
 ## Capabilities
 
@@ -29,7 +29,7 @@ An earlier debug APK must be uninstalled first because its signing certificate d
 | Navigation | Name entry, personalized home, independent Paint/Game modes, tap-to-reveal toolbar, home and exit |
 | Languages | English and Bangla; preference stored locally |
 | Capture | Camera preview and overlay composed into a PNG |
-| Design | Flat native Views UI, mint/coral mode surfaces, scrollable content, system-inset handling |
+| Design | Illustrated mode choices, adaptive columns, bounded artwork, large-text layouts, reduced-motion handling |
 | Lifecycle | Session invalidation on exit or backgrounding; stale frames and camera-start callbacks are rejected |
 
 ## Architecture
@@ -63,6 +63,8 @@ flowchart LR
 | `CaptureOutputStream.kt` | Cancels capture writes when their play session ends |
 | `FingerOverlayView.kt` | Gesture interpretation, stroke bitmap, brush smoothing, palette dwell, target collisions, scoring |
 | `SparkStyle.kt` | Shared palette and interactive surfaces |
+| `ModeTileView.kt` | Illustrated Paint/Game choices with a single accessible button per tile |
+| `HomeLayoutPolicy.kt` | Responsive content width, artwork height, mode columns, and camera-toolbar bounds |
 | `SparkBackgroundView.kt` | Static home background |
 | `GalaxyCircleView.kt` | Home orbit animation |
 | `CircleImageView.kt` | Circular creator-photo clipping |
@@ -261,10 +263,10 @@ Verification for this revision:
 | Check | Result |
 | --- | --- |
 | Debug APK assembly | Passed |
-| Signed release assembly | Passed for v1.0.0; release certificate and version metadata verified |
+| Signed release assembly | Passed for v1.1.0; release certificate and version metadata verified |
 | Android lint | Passed with no errors; dependency-version and portrait-orientation warnings remain |
-| Release lint and unit tests | Passed; 17 release-variant tests |
-| Local regression tests | 17 passed: session invalidation, frame ownership, crop mapping, visible target placement, screen-space hits, and capture cancellation |
+| Release lint and unit tests | Passed; 23 release-variant tests |
+| Local regression tests | 23 passed: responsive layout policy, session invalidation, frame ownership, crop mapping, visible target placement, screen-space hits, and capture cancellation |
 | Packaged APK permissions | Inspected to verify camera access and the absence of internet permission |
 | Native 16 KB alignment | All bundled arm64-v8a/x86_64 load segments meet 16 KB alignment; APK ZIP alignment check passed |
 | Web JavaScript syntax | Passed using `npm test` |

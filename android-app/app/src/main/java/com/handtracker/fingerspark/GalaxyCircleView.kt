@@ -26,6 +26,14 @@ class GalaxyCircleView @JvmOverloads constructor(
     private val ringBounds = RectF()
     private var startTime = SystemClock.uptimeMillis()
     private var running = false
+    var motionEnabled: Boolean = true
+        set(value) {
+            field = value
+            if (value) start() else {
+                running = false
+                invalidate()
+            }
+        }
 
     init {
         setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -58,7 +66,7 @@ class GalaxyCircleView @JvmOverloads constructor(
         val size = min(w, h)
         val cx = w / 2f
         val cy = h / 2f
-        val elapsed = (SystemClock.uptimeMillis() - startTime) / 1000f
+        val elapsed = if (motionEnabled) (SystemClock.uptimeMillis() - startTime) / 1000f else 0f
         val radius = size * 0.31f
 
         ringBounds.set(cx - radius, cy - radius, cx + radius, cy + radius)
@@ -74,9 +82,9 @@ class GalaxyCircleView @JvmOverloads constructor(
     }
 
     private fun start() {
-        running = true
+        running = motionEnabled && isShown && windowVisibility == VISIBLE
         startTime = SystemClock.uptimeMillis()
-        postInvalidateOnAnimation()
+        if (running) postInvalidateOnAnimation()
     }
 
     private fun drawRing(canvas: Canvas, rotation: Float, start: Float, sweep: Float, color: Int) {

@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android">
-    <corners android:radius="8dp" />
-    <solid android:color="#B7EFD6" />
-    <stroke
-        android:width="2dp"
-        android:color="#B7EFD6" />
-    <padding
-        android:bottom="12dp"
-        android:left="18dp"
-        android:right="18dp"
-        android:top="12dp" />
-</shape>
+<ripple xmlns:android="http://schemas.android.com/apk/res/android" android:color="#33FFFFFF">
+    <item>
+        <shape>
+            <corners android:radius="8dp" />
+            <solid android:color="#1C7058" />
+            <padding android:bottom="14dp" android:left="18dp" android:right="18dp" android:top="14dp" />
+        </shape>
+    </item>
+</ripple>

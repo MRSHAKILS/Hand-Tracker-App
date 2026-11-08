@@ -1,55 +1,84 @@
 # Finger Spark Design Direction
 
-## Implementation Brief
+## Design Brief
 
-Design Finger Spark as a children's creative play app with crisp white surfaces,
-charcoal text, mint Paint and coral Game tiles, generous touch targets, and
-responsive spacing. Keep the hand animation above the welcome content, the
-circular BN/EN control at top right, and creator details at the bottom. Use motion
-to show interaction and feedback.
+Refine Finger Spark into a polished, child-friendly Android app with clear hierarchy,
+distinct Paint and Game entry points, accessible controls, restrained motion, and
+layouts that hold up with Bangla, long names, and larger text. Preserve every
+existing feature and fully offline operation.
 
-## Chosen Style
+## Identity: Creative Studio
 
-Playful flat design informed by Material 3 Expressive principles. This is a custom
-native Views theme; it does not claim to implement the Material 3 component library.
+The visual direction is a small creative studio: a quiet canvas, deliberate ink
+typography, and two illustrated choices. Paint uses a green brush motif; Game
+uses a coral target motif. These illustrations represent the activities and are
+drawn locally with Android Canvas.
 
-Solid surfaces and distinct mode colors make the two activities easy to scan.
-Typography carries hierarchy, while icon and text labels work together. Motion is
-reserved for the existing hand, orbit, splash, and interaction feedback.
+This is a custom native Views design informed by Material principles. It does
+not add a Material component framework, a web wrapper, or a network dependency.
 
 ## Foundations
 
 | Role | Value |
 | --- | --- |
-| Background | `#F9FBFA` |
-| Primary text | `#1C2426` |
-| Secondary text | `#516061` |
-| Paint | `#B7EFD6` |
-| Game | `#FFC3B8` |
-| Mode surface corners | 8 dp |
-| Page side spacing | 24 dp |
-| Mode minimum height | 88 dp |
-| Language target | 54 x 54 dp |
+| Background | `#F8FAF9` |
+| Primary text and camera toolbar | `#1F2C31` |
+| Secondary text | `#536669` |
+| Paint surface | `#DCF2E7` |
+| Paint accent and primary action | `#1C7058` |
+| Game surface | `#FFE5DB` |
+| Game accent | `#B14633` |
+| Dividers | `#DBE4DF` |
+| Primary heading | 28 sp, medium |
+| Mode title | 22 sp, medium |
+| Mode detail | 14 sp |
+| Surface radius | 8 dp |
+| Normal side inset | 24 dp |
+| Maximum content width | 560 dp |
+| Maximum camera toolbar width | 352 dp |
 
-`SparkStyle.kt` owns the primary palette and ripple surface construction.
-The camera keeps its live visual feedback; the home screen provides a quiet
-starting point before the child enters either activity.
+Typography uses the system font with a medium weight. Labels wrap where needed.
+Greeting text can ellipsize after two lines; the full saved name remains intact.
 
-## Layout Rules
+## Layout
 
-- The artwork and welcome content share a scrolling layout, avoiding fixed-screen
-  artwork coordinates that can collide with text on smaller phones.
-- The scroll viewport reserves space for the fixed brand and language controls.
-- Mode descriptions and creator copy wrap instead of forcing fixed-height text.
-- The camera toolbar divides the available width between its five actions.
-- The static home background does not schedule continuous redraws.
-- Home animation is paused when the activity stops.
+- The language switch remains a circle at top right, with the wordmark at top left.
+- The hand and orbit sit in a bounded artwork region above the welcome content.
+- Greeting, mode choices, and creator information stay in the lower content flow.
+- Mode choices use two equal-width, equal-height columns when space permits.
+- Content below 288 dp wide, or a font scale above 1.25, switches to stacked mode rows.
+- Short windows reduce the artwork region from 176 to 140 dp.
+- Larger windows center the content within a 560 dp column.
+- Content remains scrollable. The keyboard inset and fixed header have reserved space.
+- Creator information has a divider and small circular portrait rather than another card.
+- Camera controls use a compact dark tray with capture as the primary accent.
+- Camera controls are hidden until the camera screen is pressed.
 
-## Research
+## Interaction And Accessibility
+
+- Each mode tile is one accessible button with a localized name and detail.
+- Mode illustrations and the orbit are decorative and do not create extra focus targets.
+- The name field has inline validation and supports the keyboard Done action.
+- The language switch preserves Bn/En casing and has a localized target description.
+- Buttons use visible ripple feedback and icon tooltips.
+- Screen-reader touch exploration prevents premature toolbar auto-hide.
+- On supported Android versions, toolbar timeout respects the accessibility timeout.
+- Disabled system animations or battery saver produce a static home illustration
+  and skip the animated splash.
+- No decorative background animation runs continuously.
+
+## Implementation
+
+`SparkStyle.kt` holds the palette and ripple styling. `ModeTileView.kt` owns the
+mode-choice presentation and static Canvas art. `HomeLayoutPolicy.kt` centralizes
+responsive layout decisions and has six focused JVM tests.
+
+The UI update is version 1.1.0. Device screenshots and live touch verification
+are still pending because no authorized phone or configured emulator was
+available during implementation.
+
+## References
 
 - [Google: Expressive Design research](https://design.google/library/expressive-material-design-google-research)
 - [Material Design: Color roles](https://m3.material.io/styles/color/the-color-system)
 - [NN/g: Designing for Kids, Cognitive Considerations](https://www.nngroup.com/articles/kids-cognition/)
-
-The style choice is a design judgment informed by these sources. It still needs
-observation with children and visual checks on a connected phone.
